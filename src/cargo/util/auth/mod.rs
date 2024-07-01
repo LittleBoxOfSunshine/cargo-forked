@@ -497,7 +497,7 @@ static BUILT_IN_PROVIDERS: &[&'static str] = &[
     "cargo:libsecret",
 ];
 
-fn credential_action(
+pub fn credential_action(
     gctx: &GlobalContext,
     sid: &SourceId,
     action: Action<'_>,
