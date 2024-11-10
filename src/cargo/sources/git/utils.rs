@@ -164,6 +164,7 @@ impl GitRemote {
 
 impl GitDatabase {
     /// Checkouts to a revision at `dest`ination from this database.
+    #[tracing::instrument(skip(self, gctx))]
     pub fn copy_to(
         &self,
         rev: git2::Oid,
@@ -668,7 +669,7 @@ where
         debug_assert!(res.is_err());
         let mut attempts = vec![String::from("git")];
         if let Ok(s) = gctx.get_env("USER").or_else(|_| gctx.get_env("USERNAME")) {
-            attempts.push(s);
+            attempts.push(s.to_string());
         }
         if let Some(ref s) = cred_helper.username {
             attempts.push(s.clone());
@@ -1192,6 +1193,8 @@ fn fetch_with_cli(
     cmd.arg("fetch");
     if tags {
         cmd.arg("--tags");
+    } else {
+        cmd.arg("--no-tags");
     }
     match gctx.shell().verbosity() {
         Verbosity::Normal => {}

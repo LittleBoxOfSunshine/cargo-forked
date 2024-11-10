@@ -1,11 +1,13 @@
 //! Tests for `path` dependencies.
 
-use cargo_test_support::paths::{self, CargoPathExt};
+use std::fs;
+
+use cargo_test_support::paths;
+use cargo_test_support::prelude::*;
 use cargo_test_support::registry::Package;
 use cargo_test_support::str;
 use cargo_test_support::{basic_lib_manifest, basic_manifest, main_file, project};
 use cargo_test_support::{sleep_ms, t};
-use std::fs;
 
 #[cargo_test]
 // I have no idea why this is failing spuriously on Windows;
@@ -73,7 +75,7 @@ fn cargo_compile_with_nested_deps_shorthand() {
 
     p.cargo("build")
         .with_stderr_data(str![[r#"
-[LOCKING] 3 packages to latest compatible versions
+[LOCKING] 2 packages to latest compatible versions
 [COMPILING] baz v0.5.0 ([ROOT]/foo/bar/baz)
 [COMPILING] bar v0.5.0 ([ROOT]/foo/bar)
 [COMPILING] foo v0.5.0 ([ROOT]/foo)
@@ -158,7 +160,7 @@ fn cargo_compile_with_root_dev_deps() {
     p.cargo("check")
         .with_status(101)
         .with_stderr_data(str![[r#"
-[LOCKING] 2 packages to latest compatible versions
+[LOCKING] 1 package to latest compatible version
 [CHECKING] foo v0.5.0 ([ROOT]/foo)
 error[E0463]: can't find crate for `bar`
 ...
@@ -205,7 +207,7 @@ fn cargo_compile_with_root_dev_deps_with_testing() {
 
     p.cargo("test")
         .with_stderr_data(str![[r#"
-[LOCKING] 2 packages to latest compatible versions
+[LOCKING] 1 package to latest compatible version
 [COMPILING] bar v0.5.0 ([ROOT]/bar)
 [COMPILING] foo v0.5.0 ([ROOT]/foo)
 [FINISHED] `test` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
@@ -274,7 +276,7 @@ fn cargo_compile_with_transitive_dev_deps() {
 
     p.cargo("build")
         .with_stderr_data(str![[r#"
-[LOCKING] 2 packages to latest compatible versions
+[LOCKING] 1 package to latest compatible version
 [COMPILING] bar v0.5.0 ([ROOT]/foo/bar)
 [COMPILING] foo v0.5.0 ([ROOT]/foo)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
@@ -316,7 +318,7 @@ fn no_rebuild_dependency() {
     // First time around we should compile both foo and bar
     p.cargo("check")
         .with_stderr_data(str![[r#"
-[LOCKING] 2 packages to latest compatible versions
+[LOCKING] 1 package to latest compatible version
 [CHECKING] bar v0.5.0 ([ROOT]/foo/bar)
 [CHECKING] foo v0.5.0 ([ROOT]/foo)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
@@ -385,7 +387,7 @@ fn deep_dependencies_trigger_rebuild() {
         .build();
     p.cargo("check")
         .with_stderr_data(str![[r#"
-[LOCKING] 3 packages to latest compatible versions
+[LOCKING] 2 packages to latest compatible versions
 [CHECKING] baz v0.5.0 ([ROOT]/foo/baz)
 [CHECKING] bar v0.5.0 ([ROOT]/foo/bar)
 [CHECKING] foo v0.5.0 ([ROOT]/foo)
@@ -479,7 +481,7 @@ fn no_rebuild_two_deps() {
         .build();
     p.cargo("build")
         .with_stderr_data(str![[r#"
-[LOCKING] 3 packages to latest compatible versions
+[LOCKING] 2 packages to latest compatible versions
 [COMPILING] baz v0.5.0 ([ROOT]/foo/baz)
 [COMPILING] bar v0.5.0 ([ROOT]/foo/bar)
 [COMPILING] foo v0.5.0 ([ROOT]/foo)
@@ -523,7 +525,7 @@ fn nested_deps_recompile() {
 
     p.cargo("check")
         .with_stderr_data(str![[r#"
-[LOCKING] 2 packages to latest compatible versions
+[LOCKING] 1 package to latest compatible version
 [CHECKING] bar v0.5.0 ([ROOT]/foo/src/bar)
 [CHECKING] foo v0.5.0 ([ROOT]/foo)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
@@ -584,6 +586,618 @@ Caused by:
   [NOT_FOUND]
 
 "#]])
+        .run();
+}
+
+#[cargo_test]
+fn path_bases_not_stable() {
+    let bar = project()
+        .at("bar")
+        .file("Cargo.toml", &basic_manifest("bar", "0.5.0"))
+        .file("src/lib.rs", "")
+        .build();
+
+    let p = project()
+        .file(
+            ".cargo/config.toml",
+            &format!(
+                r#"
+                    [path-bases]
+                    test = '{}'
+                "#,
+                bar.root().parent().unwrap().display()
+            ),
+        )
+        .file(
+            "Cargo.toml",
+            r#"
+                [package]
+
+                name = "foo"
+                version = "0.5.0"
+                authors = ["wycats@example.com"]
+
+                [dependencies]
+                bar = { base = 'test', path = 'bar' }
+            "#,
+        )
+        .file("src/lib.rs", "")
+        .build();
+
+    p.cargo("build")
+        .with_status(101)
+        .with_stderr_data(
+            "\
+[ERROR] failed to parse manifest at `[..]/foo/Cargo.toml`
+
+Caused by:
+  resolving path dependency bar
+
+Caused by:
+  feature `path-bases` is required
+
+  The package requires the Cargo feature called `path-bases`, but that feature is not stabilized in this version of Cargo ([..]).
+  Consider trying a newer version of Cargo (this may require the nightly release).
+  See https://doc.rust-lang.org/nightly/cargo/reference/unstable.html#path-bases for more information about the status of this feature.
+",
+        )
+        .run();
+}
+
+#[cargo_test]
+fn path_with_base() {
+    let bar = project()
+        .at("bar")
+        .file("Cargo.toml", &basic_manifest("bar", "0.5.0"))
+        .file("src/lib.rs", "")
+        .build();
+
+    let p = project()
+        .file(
+            ".cargo/config.toml",
+            &format!(
+                r#"
+                    [path-bases]
+                    test = '{}'
+                "#,
+                bar.root().parent().unwrap().display()
+            ),
+        )
+        .file(
+            "Cargo.toml",
+            r#"
+                cargo-features = ["path-bases"]
+
+                [package]
+                name = "foo"
+                version = "0.5.0"
+                authors = ["wycats@example.com"]
+
+                [dependencies]
+                bar = { base = 'test', path = 'bar' }
+            "#,
+        )
+        .file("src/lib.rs", "")
+        .build();
+
+    p.cargo("build -v")
+        .masquerade_as_nightly_cargo(&["path-bases"])
+        .run();
+}
+
+#[cargo_test]
+fn current_dir_with_base() {
+    let bar = project()
+        .at("bar")
+        .file("Cargo.toml", &basic_manifest("bar", "0.5.0"))
+        .file("src/lib.rs", "")
+        .build();
+
+    let p = project()
+        .file(
+            ".cargo/config.toml",
+            &format!(
+                r#"
+                    [path-bases]
+                    test = '{}'
+                "#,
+                bar.root().display()
+            ),
+        )
+        .file(
+            "Cargo.toml",
+            r#"
+                cargo-features = ["path-bases"]
+
+                [package]
+                name = "foo"
+                version = "0.5.0"
+                authors = ["wycats@example.com"]
+
+                [dependencies]
+                bar = { base = 'test', path = '.' }
+            "#,
+        )
+        .file("src/lib.rs", "")
+        .build();
+
+    p.cargo("build -v")
+        .masquerade_as_nightly_cargo(&["path-bases"])
+        .run();
+}
+
+#[cargo_test]
+fn parent_dir_with_base() {
+    let bar = project()
+        .at("bar")
+        .file("Cargo.toml", &basic_manifest("bar", "0.5.0"))
+        .file("src/lib.rs", "")
+        .build();
+
+    let p = project()
+        .file(
+            ".cargo/config.toml",
+            &format!(
+                r#"
+                    [path-bases]
+                    test = '{}/subdir'
+                "#,
+                bar.root().display()
+            ),
+        )
+        .file(
+            "Cargo.toml",
+            r#"
+                cargo-features = ["path-bases"]
+
+                [package]
+                name = "foo"
+                version = "0.5.0"
+                authors = ["wycats@example.com"]
+
+                [dependencies]
+                bar = { base = 'test', path = '..' }
+            "#,
+        )
+        .file("src/lib.rs", "")
+        .build();
+
+    p.cargo("build -v")
+        .masquerade_as_nightly_cargo(&["path-bases"])
+        .run();
+}
+
+#[cargo_test]
+fn inherit_dependency_using_base() {
+    let bar = project()
+        .at("dep_with_base")
+        .file("Cargo.toml", &basic_manifest("dep_with_base", "0.5.0"))
+        .file("src/lib.rs", "")
+        .build();
+
+    let p = project()
+        .file(
+            ".cargo/config.toml",
+            &format!(
+                r#"
+                    [path-bases]
+                    test = '{}'
+                "#,
+                bar.root().parent().unwrap().display()
+            ),
+        )
+        .file(
+            "Cargo.toml",
+            r#"
+                [package]
+                name = "parent"
+                version = "0.1.0"
+                authors = []
+
+                [workspace]
+                members = ["child"]
+
+                [workspace.dependencies]
+                dep_with_base = { base = 'test', path = 'dep_with_base' }
+            "#,
+        )
+        .file("src/main.rs", "fn main() {}")
+        .file(
+            "child/Cargo.toml",
+            r#"
+                cargo-features = ["path-bases"]
+
+                [package]
+                name = "child"
+                version = "0.1.0"
+                authors = []
+
+                [dependencies]
+                dep_with_base = { workspace = true }
+            "#,
+        )
+        .file("child/src/main.rs", "fn main() {}")
+        .build();
+
+    p.cargo("build -v")
+        .masquerade_as_nightly_cargo(&["path-bases"])
+        .run();
+}
+
+#[cargo_test]
+fn path_with_relative_base() {
+    project()
+        .at("shared_proj/bar")
+        .file("Cargo.toml", &basic_manifest("bar", "0.5.0"))
+        .file("src/lib.rs", "")
+        .build();
+
+    let p = project()
+        .file(
+            "../.cargo/config.toml",
+            r#"
+                [path-bases]
+                test = 'shared_proj'
+            "#,
+        )
+        .file(
+            "Cargo.toml",
+            r#"
+                cargo-features = ["path-bases"]
+
+                [package]
+                name = "foo"
+                version = "0.5.0"
+                authors = ["wycats@example.com"]
+
+                [dependencies]
+                bar = { base = 'test', path = 'bar' }
+            "#,
+        )
+        .file("src/lib.rs", "")
+        .build();
+
+    p.cargo("build -v")
+        .masquerade_as_nightly_cargo(&["path-bases"])
+        .run();
+}
+
+#[cargo_test]
+fn workspace_builtin_base() {
+    project()
+        .at("dep_with_base")
+        .file("Cargo.toml", &basic_manifest("dep_with_base", "0.5.0"))
+        .file("src/lib.rs", "")
+        .build();
+
+    let p = project()
+        .file(
+            "Cargo.toml",
+            r#"
+                [package]
+                name = "parent"
+                version = "0.1.0"
+                authors = []
+
+                [workspace]
+                members = ["child"]
+            "#,
+        )
+        .file("src/main.rs", "fn main() {}")
+        .file(
+            "child/Cargo.toml",
+            r#"
+                cargo-features = ["path-bases"]
+
+                [package]
+                name = "child"
+                version = "0.1.0"
+                authors = []
+
+                [dependencies]
+                dep_with_base = { base = 'workspace', path = '../dep_with_base' }
+            "#,
+        )
+        .file("child/src/main.rs", "fn main() {}")
+        .build();
+
+    p.cargo("build -v")
+        .masquerade_as_nightly_cargo(&["path-bases"])
+        .run();
+}
+
+#[cargo_test]
+fn workspace_builtin_base_not_a_workspace() {
+    let p = project()
+        .file(
+            "Cargo.toml",
+            r#"
+                cargo-features = ["path-bases"]
+
+                [package]
+                name = "foo"
+                version = "0.1.0"
+                authors = []
+
+                [dependencies]
+                bar = { base = 'workspace', path = 'bar' }
+            "#,
+        )
+        .file("src/main.rs", "fn main() {}")
+        .build();
+
+    p.cargo("build")
+        .masquerade_as_nightly_cargo(&["path-bases"])
+        .with_status(101)
+        .with_stderr_data(
+            "\
+[ERROR] failed to parse manifest at `[ROOT]/foo/Cargo.toml`
+
+Caused by:
+  resolving path dependency bar
+
+Caused by:
+  failed to find a workspace root
+",
+        )
+        .run();
+}
+
+#[cargo_test]
+fn shadow_workspace_builtin_base() {
+    let bar = project()
+        .at("dep_with_base")
+        .file("Cargo.toml", &basic_manifest("dep_with_base", "0.5.0"))
+        .file("src/lib.rs", "")
+        .build();
+
+    let p = project()
+        .file(
+            ".cargo/config.toml",
+            &format!(
+                r#"
+                    [path-bases]
+                    workspace = '{}/subdir/anotherdir'
+                "#,
+                bar.root().parent().unwrap().display()
+            ),
+        )
+        .file(
+            "Cargo.toml",
+            r#"
+                [package]
+                name = "parent"
+                version = "0.1.0"
+                authors = []
+
+                [workspace]
+                members = ["child"]
+            "#,
+        )
+        .file("src/main.rs", "fn main() {}")
+        .file(
+            "child/Cargo.toml",
+            r#"
+                cargo-features = ["path-bases"]
+
+                [package]
+                name = "child"
+                version = "0.1.0"
+                authors = []
+
+                [dependencies]
+                dep_with_base = { base = 'workspace', path = '../../dep_with_base' }
+            "#,
+        )
+        .file("child/src/main.rs", "fn main() {}")
+        .build();
+
+    p.cargo("build -v")
+        .masquerade_as_nightly_cargo(&["path-bases"])
+        .run();
+}
+
+#[cargo_test]
+fn unknown_base() {
+    let p = project()
+        .file(
+            "Cargo.toml",
+            r#"
+                cargo-features = ["path-bases"]
+
+                [package]
+                name = "foo"
+                version = "0.5.0"
+                authors = ["wycats@example.com"]
+
+                [dependencies]
+                bar = { base = 'test', path = 'bar' }
+            "#,
+        )
+        .file("src/lib.rs", "")
+        .build();
+
+    p.cargo("build")
+        .masquerade_as_nightly_cargo(&["path-bases"])
+        .with_status(101)
+        .with_stderr_data(
+            "\
+[ERROR] failed to parse manifest at `[..]/foo/Cargo.toml`
+
+Caused by:
+  resolving path dependency bar
+
+Caused by:
+  path base `test` is undefined. You must add an entry for `test` in the Cargo configuration [path-bases] table.
+",
+        )
+        .run();
+}
+
+#[cargo_test]
+fn base_without_path() {
+    let p = project()
+        .file(
+            "Cargo.toml",
+            r#"
+                cargo-features = ["path-bases"]
+
+                [package]
+                name = "foo"
+                version = "0.5.0"
+                authors = ["wycats@example.com"]
+
+                [dependencies]
+                bar = { version = '1.0.0', base = 'test' }
+            "#,
+        )
+        .file("src/lib.rs", "")
+        .build();
+
+    p.cargo("build")
+        .masquerade_as_nightly_cargo(&["path-bases"])
+        .with_status(101)
+        .with_stderr_data(
+            "\
+[ERROR] failed to parse manifest at `[..]/foo/Cargo.toml`
+
+Caused by:
+  resolving path dependency bar
+
+Caused by:
+  `base` can only be used with path dependencies
+",
+        )
+        .run();
+}
+
+#[cargo_test]
+fn invalid_base() {
+    let p = project()
+        .file(
+            "Cargo.toml",
+            r#"
+                cargo-features = ["path-bases"]
+
+                [package]
+                name = "foo"
+                version = "0.5.0"
+                authors = ["wycats@example.com"]
+
+                [dependencies]
+                bar = { base = '^^not-valid^^', path = 'bar' }
+            "#,
+        )
+        .file("src/lib.rs", "")
+        .build();
+
+    p.cargo("build")
+        .masquerade_as_nightly_cargo(&["path-bases"])
+        .with_status(101)
+        .with_stderr_data(
+            "\
+[ERROR] invalid character `^` in path base name: `^^not-valid^^`, the first character must be a Unicode XID start character (most letters or `_`)
+
+
+  --> Cargo.toml:10:23
+   |
+10 |                 bar = { base = '^^not-valid^^', path = 'bar' }
+   |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+",
+        )
+        .run();
+}
+
+#[cargo_test]
+fn invalid_path_with_base() {
+    let p = project()
+        .file(
+            ".cargo/config.toml",
+            r#"
+            [path-bases]
+            test = 'shared_proj'
+        "#,
+        )
+        .file(
+            "Cargo.toml",
+            r#"
+                cargo-features = ["path-bases"]
+
+                [package]
+                name = "foo"
+                version = "0.5.0"
+                authors = ["wycats@example.com"]
+                edition = "2015"
+
+                [dependencies]
+                bar = { base = 'test', path = '"' }
+            "#,
+        )
+        .file("src/lib.rs", "")
+        .build();
+
+    p.cargo("build")
+        .masquerade_as_nightly_cargo(&["path-bases"])
+        .with_status(101)
+        .with_stderr_data(
+            "\
+[ERROR] failed to get `bar` as a dependency of package `foo v0.5.0 ([ROOT]/foo)`
+
+Caused by:
+  failed to load source for dependency `bar`
+
+Caused by:
+  Unable to update [ROOT]/foo/shared_proj/\"
+
+Caused by:
+  failed to read `[ROOT]/foo/shared_proj/\"/Cargo.toml`
+
+Caused by:
+  [NOT_FOUND]
+",
+        )
+        .run();
+}
+
+#[cargo_test]
+fn self_dependency_using_base() {
+    let p = project()
+        .file(
+            ".cargo/config.toml",
+            r#"
+            [path-bases]
+            test = '.'
+        "#,
+        )
+        .file(
+            "Cargo.toml",
+            r#"
+                cargo-features = ["path-bases"]
+
+                [package]
+                name = "foo"
+                version = "0.1.0"
+                authors = []
+                edition = "2015"
+
+                [dependencies]
+                foo = { base = 'test', path = '.' }
+            "#,
+        )
+        .file("src/main.rs", "fn main() {}")
+        .build();
+
+    p.cargo("build")
+        .masquerade_as_nightly_cargo(&["path-bases"])
+        .with_status(101)
+        .with_stderr_data(
+            "\
+[ERROR] cyclic package dependency: package `foo v0.1.0 ([ROOT]/foo)` depends on itself. Cycle:
+package `foo v0.1.0 ([ROOT]/foo)`
+    ... which satisfies path dependency `foo` of package `foo v0.1.0 ([ROOT]/foo)`
+",
+        )
         .run();
 }
 
@@ -771,7 +1385,7 @@ fn path_dep_build_cmd() {
 
     p.cargo("build")
         .with_stderr_data(str![[r#"
-[LOCKING] 2 packages to latest compatible versions
+[LOCKING] 1 package to latest compatible version
 [COMPILING] bar v0.5.0 ([ROOT]/foo/bar)
 [COMPILING] foo v0.5.0 ([ROOT]/foo)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
@@ -841,7 +1455,7 @@ fn dev_deps_no_rebuild_lib() {
     p.cargo("build")
         .env("FOO", "bar")
         .with_stderr_data(str![[r#"
-[LOCKING] 2 packages to latest compatible versions
+[LOCKING] 1 package to latest compatible version
 [COMPILING] foo v0.5.0 ([ROOT]/foo)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
@@ -903,7 +1517,6 @@ fn custom_target_no_rebuild() {
         .build();
     p.cargo("check")
         .with_stderr_data(str![[r#"
-[LOCKING] 3 packages to latest compatible versions
 [CHECKING] a v0.5.0 ([ROOT]/foo/a)
 [CHECKING] foo v0.5.0 ([ROOT]/foo)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
@@ -963,10 +1576,9 @@ fn override_and_depend() {
     p.cargo("check")
         .cwd("b")
         .with_stderr_data(str![[r#"
-[LOCKING] 3 packages to latest compatible versions
-[WARNING] skipping duplicate package `a2` found at `[ROOT]/foo/[..]`
-[CHECKING] a2 v0.5.0 ([ROOT]/foo/[..])
-[CHECKING] a1 v0.5.0 ([ROOT]/foo/[..])
+[LOCKING] 2 packages to latest compatible versions
+[CHECKING] a2 v0.5.0 ([ROOT]/foo/a)
+[CHECKING] a1 v0.5.0 ([ROOT]/foo/a)
 [CHECKING] b v0.5.0 ([ROOT]/foo/b)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
@@ -987,10 +1599,10 @@ fn missing_path_dependency() {
     p.cargo("check")
         .with_status(101)
         .with_stderr_data(str![[r#"
-[ERROR] failed to update path override `[ROOT]/foo/../whoa-this-does-not-exist` (defined in `[ROOT]/foo/.cargo/config.toml`)
+[ERROR] failed to update path override `[ROOT]/whoa-this-does-not-exist` (defined in `[ROOT]/foo/.cargo/config.toml`)
 
 Caused by:
-  failed to read directory `[ROOT]/foo/../whoa-this-does-not-exist`
+  failed to read directory `[ROOT]/whoa-this-does-not-exist`
 
 Caused by:
   [NOT_FOUND]
@@ -1276,7 +1888,7 @@ fn same_name_version_changed() {
 
     p.cargo("tree")
         .with_stderr_data(str![[r#"
-[LOCKING] 2 packages to latest compatible versions
+[LOCKING] 1 package to latest compatible version
 
 "#]])
         .with_stdout_data(str![[r#"

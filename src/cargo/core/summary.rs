@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::mem;
-use std::rc::Rc;
+use std::sync::Arc;
 
 /// Subset of a `Manifest`. Contains only the most important information about
 /// a package.
@@ -17,17 +17,46 @@ use std::rc::Rc;
 /// Summaries are cloned, and should not be mutated after creation
 #[derive(Debug, Clone)]
 pub struct Summary {
-    inner: Rc<Inner>,
+    inner: Arc<Inner>,
 }
 
 #[derive(Debug, Clone)]
 struct Inner {
     package_id: PackageId,
     dependencies: Vec<Dependency>,
-    features: Rc<FeatureMap>,
+    features: Arc<FeatureMap>,
     checksum: Option<String>,
     links: Option<InternedString>,
     rust_version: Option<RustVersion>,
+}
+
+/// Indicates the dependency inferred from the `dep` syntax that should exist,
+/// but missing on the resolved dependencies tables.
+#[derive(Debug)]
+pub struct MissingDependencyError {
+    pub dep_name: InternedString,
+    pub feature: InternedString,
+    pub feature_value: FeatureValue,
+    /// Indicates the dependency inferred from the `dep?` syntax that is weak optional
+    pub weak_optional: bool,
+}
+
+impl std::error::Error for MissingDependencyError {}
+
+impl fmt::Display for MissingDependencyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self {
+            dep_name,
+            feature,
+            feature_value: fv,
+            ..
+        } = self;
+
+        write!(
+            f,
+            "feature `{feature}` includes `{fv}`, but `{dep_name}` is not a dependency",
+        )
+    }
 }
 
 impl Summary {
@@ -53,10 +82,10 @@ impl Summary {
         }
         let feature_map = build_feature_map(features, &dependencies)?;
         Ok(Summary {
-            inner: Rc::new(Inner {
+            inner: Arc::new(Inner {
                 package_id: pkg_id,
                 dependencies,
-                features: Rc::new(feature_map),
+                features: Arc::new(feature_map),
                 checksum: None,
                 links: links.map(|l| l.into()),
                 rust_version,
@@ -95,12 +124,12 @@ impl Summary {
     }
 
     pub fn override_id(mut self, id: PackageId) -> Summary {
-        Rc::make_mut(&mut self.inner).package_id = id;
+        Arc::make_mut(&mut self.inner).package_id = id;
         self
     }
 
     pub fn set_checksum(&mut self, cksum: String) {
-        Rc::make_mut(&mut self.inner).checksum = Some(cksum);
+        Arc::make_mut(&mut self.inner).checksum = Some(cksum);
     }
 
     pub fn map_dependencies<F>(self, mut f: F) -> Summary
@@ -115,7 +144,7 @@ impl Summary {
         F: FnMut(Dependency) -> CargoResult<Dependency>,
     {
         {
-            let slot = &mut Rc::make_mut(&mut self.inner).dependencies;
+            let slot = &mut Arc::make_mut(&mut self.inner).dependencies;
             *slot = mem::take(slot)
                 .into_iter()
                 .map(f)
@@ -149,6 +178,12 @@ impl Hash for Summary {
     }
 }
 
+// A check that only compiles if Summary is Sync
+const _: fn() = || {
+    fn is_sync<T: Sync>() {}
+    is_sync::<Summary>();
+};
+
 /// Checks features for errors, bailing out a CargoResult:Err if invalid,
 /// and creates FeatureValues for each feature.
 fn build_feature_map(
@@ -181,6 +216,7 @@ fn build_feature_map(
         .flatten()
         .filter_map(|fv| fv.explicit_dep_name())
         .collect();
+
     for dep in dependencies {
         if !dep.is_optional() {
             continue;
@@ -207,7 +243,7 @@ fn build_feature_map(
                         if !is_any_dep {
                             bail!(
                                 "feature `{feature}` includes `{fv}` which is neither a dependency \
-                                 nor another feature"                              
+                                 nor another feature"
                               );
                         }
                         if is_optional_dep {
@@ -274,7 +310,12 @@ fn build_feature_map(
 
                     // Validation of the feature name will be performed in the resolver.
                     if !is_any_dep {
-                        bail!("feature `{feature}` includes `{fv}`, but `{dep_name}` is not a dependency");
+                        bail!(MissingDependencyError {
+                            feature: *feature,
+                            feature_value: (*fv).clone(),
+                            dep_name: *dep_name,
+                            weak_optional: *weak,
+                        })
                     }
                     if *weak && !is_optional_dep {
                         bail!(

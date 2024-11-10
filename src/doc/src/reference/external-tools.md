@@ -46,6 +46,12 @@ The `package_id` field is a unique identifier for referring to the package, and
 as the `--package` argument to many commands. The syntax grammar can be found in
 chapter [Package ID Specifications].
 
+> **Note:** `--message-format=json` only controls Cargo and Rustc's output.
+> This cannot control the output of other tools,
+> e.g. `cargo run --message-format=json`,
+> or arbitrary output from procedural macros.
+> A possible workaround in these situations is to only interpret a line as JSON if it starts with `{`.
+
 The `--message-format` option can also take additional formatting values which
 alter the way the JSON messages are computed and rendered. See the description
 of the `--message-format` option in the [build command documentation] for more
@@ -53,6 +59,8 @@ details.
 
 If you are using Rust, the [cargo_metadata] crate can be used to parse these
 messages.
+
+> **MSRV:** 1.77 is required for `package_id` to be a Package ID Specification. Before that, it was opaque.
 
 [build command documentation]: ../commands/cargo-build.md
 [cargo_metadata]: https://crates.io/crates/cargo_metadata

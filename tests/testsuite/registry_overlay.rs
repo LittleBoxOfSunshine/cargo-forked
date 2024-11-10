@@ -1,5 +1,6 @@
 //! Tests for local-registry sources.
 
+use cargo_test_support::prelude::*;
 use cargo_test_support::project;
 use cargo_test_support::registry::{Package, RegistryBuilder, TestRegistry};
 
@@ -79,7 +80,7 @@ fn registry_version_wins() {
         .with_stderr_data(
             "\
 [UPDATING] [..]
-[LOCKING] 2 packages to latest compatible versions
+[LOCKING] 1 package to latest compatible version
 [DOWNLOADING] crates ...
 [DOWNLOADED] baz v0.1.1 (registry [..])
 [CHECKING] baz v0.1.1
@@ -122,7 +123,7 @@ fn overlay_version_wins() {
         .with_stderr_data(
             "\
 [UPDATING] [..]
-[LOCKING] 2 packages to latest compatible versions
+[LOCKING] 1 package to latest compatible version
 [UNPACKING] baz v0.1.1 (registry [..])
 [CHECKING] baz v0.1.1
 [CHECKING] foo v0.0.1 ([ROOT]/foo)
@@ -250,8 +251,8 @@ fn registry_dep_depends_on_new_local_package() {
         .with_stderr_data(
             "\
 [UPDATING] [..]
-[LOCKING] 4 packages to latest compatible versions
-[ADDING] workspace-package v0.0.1 (latest: v0.1.1)
+[LOCKING] 3 packages to latest compatible versions
+[ADDING] workspace-package v0.0.1 (available: v0.1.1)
 [DOWNLOADING] crates ...
 [UNPACKING] [..]
 [DOWNLOADED] [..]

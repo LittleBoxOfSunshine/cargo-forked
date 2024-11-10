@@ -4,10 +4,12 @@
 //! rebuild the real one. There is a separate integration test `build-std`
 //! which builds the real thing, but that should be avoided if possible.
 
+use std::path::{Path, PathBuf};
+
+use cargo_test_support::prelude::*;
 use cargo_test_support::registry::{Dependency, Package};
 use cargo_test_support::ProjectBuilder;
 use cargo_test_support::{paths, project, rustc_host, str, Execs};
-use std::path::{Path, PathBuf};
 
 struct Setup {
     rustc_wrapper: PathBuf,
@@ -130,7 +132,7 @@ fn setup() -> Setup {
 fn enable_build_std(e: &mut Execs, setup: &Setup) {
     // First up, force Cargo to use our "mock sysroot" which mimics what
     // libstd looks like upstream.
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testsuite/mock-std");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testsuite/mock-std/library");
     e.env("__CARGO_TESTS_ONLY_SRC_ROOT", &root);
 
     e.masquerade_as_nightly_cargo(&["build-std"]);
@@ -245,6 +247,73 @@ fn basic() {
 }
 
 #[cargo_test(build_std_mock)]
+fn shared_std_dependency_rebuild() {
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let setup = setup();
+    let p = project()
+        .file(
+            "Cargo.toml",
+            format!(
+                "
+                [package]
+                name = \"foo\"
+                version = \"0.1.0\"
+                edition = \"2021\"
+
+                [build-dependencies]
+                dep_test = {{ path = \"{}/tests/testsuite/mock-std/dep_test\" }}
+            ",
+                manifest_dir
+            )
+            .as_str(),
+        )
+        .file(
+            "src/main.rs",
+            r#"
+            fn main() {
+                println!("Hello, World!");
+            }
+            "#,
+        )
+        .file(
+            "build.rs",
+            r#"
+            fn main() {
+                println!("cargo::rerun-if-changed=build.rs");
+            }
+            "#,
+        )
+        .build();
+
+    p.cargo("build -v")
+        .build_std(&setup)
+        .target_host()
+        .with_stderr_data(str![[r#"
+...
+[RUNNING] `[..] rustc --crate-name dep_test [..]`
+...
+[RUNNING] `[..] rustc --crate-name dep_test [..]`
+...
+"#]])
+        .run();
+
+    // TODO: Because of the way in which std is resolved, it's mandatory that this is left commented
+    // out as it will fail. This case should result in `dep_test` only being built once, however
+    // it's still being built twice. This is a bug.
+    //
+    //    p.cargo("build -v")
+    //        .build_std(&setup)
+    //        .with_stderr_does_not_contain(str![[r#"
+    //...
+    //[RUNNING] `[..] rustc --crate-name dep_test [..]`
+    //...
+    //[RUNNING] `[..] rustc --crate-name dep_test [..]`
+    //...
+    //"#]])
+    //        .run();
+}
+
+#[cargo_test(build_std_mock)]
 fn simple_lib_std() {
     let setup = setup();
 
@@ -279,7 +348,6 @@ fn simple_bin_std() {
     p.cargo("run -v").build_std(&setup).target_host().run();
 }
 
-#[allow(deprecated)]
 #[cargo_test(build_std_mock)]
 fn lib_nostd() {
     let setup = setup();
@@ -592,7 +660,6 @@ fn ignores_incremental() {
         .starts_with("foo-"));
 }
 
-#[allow(deprecated)]
 #[cargo_test(build_std_mock)]
 fn cargo_config_injects_compiler_builtins() {
     let setup = setup();
@@ -691,7 +758,6 @@ fn proc_macro_only() {
         .run();
 }
 
-#[allow(deprecated)]
 #[cargo_test(build_std_mock)]
 fn fetch() {
     let setup = setup();

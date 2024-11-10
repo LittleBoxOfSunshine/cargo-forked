@@ -52,7 +52,7 @@ use crate::core::{PackageId, PackageSet, SourceId, TargetKind, Workspace};
 use crate::drop_println;
 use crate::ops;
 use crate::ops::resolve::WorkspaceResolve;
-use crate::util::context::GlobalContext;
+use crate::util::context::{GlobalContext, WarningHandling};
 use crate::util::interning::InternedString;
 use crate::util::{CargoResult, StableHasher};
 
@@ -138,7 +138,11 @@ pub fn compile_with_exec<'a>(
     exec: &Arc<dyn Executor>,
 ) -> CargoResult<Compilation<'a>> {
     ws.emit_warnings()?;
-    compile_ws(ws, options, exec)
+    let compilation = compile_ws(ws, options, exec)?;
+    if ws.gctx().warning_handling()? == WarningHandling::Deny && compilation.warning_count > 0 {
+        anyhow::bail!("warnings are denied by `build.warnings` configuration")
+    }
+    Ok(compilation)
 }
 
 /// Like [`compile_with_exec`] but without warnings from manifest parsing.
@@ -156,7 +160,11 @@ pub fn compile_ws<'a>(
     }
     crate::core::gc::auto_gc(bcx.gctx);
     let build_runner = BuildRunner::new(&bcx)?;
-    build_runner.compile(exec)
+    if options.build_config.dry_run {
+        build_runner.dry_run()
+    } else {
+        build_runner.compile(exec)
+    }
 }
 
 /// Executes `rustc --print <VALUE>`.
@@ -360,6 +368,7 @@ pub fn create_bcx<'a, 'gctx>(
     let generator = UnitGenerator {
         ws,
         packages: &to_builds,
+        target_data: &target_data,
         filter,
         requested_kinds: &build_config.requested_kinds,
         explicit_host_kind,
@@ -399,6 +408,7 @@ pub fn create_bcx<'a, 'gctx>(
             &pkg_set,
             interner,
             &profiles,
+            &target_data,
         )?
     } else {
         Default::default()
@@ -694,6 +704,9 @@ fn traverse_and_share(
             to_host.unwrap(),
             unit.mode,
             unit.features.clone(),
+            unit.rustflags.clone(),
+            unit.rustdocflags.clone(),
+            unit.links_overrides.clone(),
             unit.is_std,
             unit.dep_hash,
             unit.artifact,
@@ -719,6 +732,9 @@ fn traverse_and_share(
         canonical_kind,
         unit.mode,
         unit.features.clone(),
+        unit.rustflags.clone(),
+        unit.rustdocflags.clone(),
+        unit.links_overrides.clone(),
         unit.is_std,
         new_dep_hash,
         unit.artifact,
@@ -880,6 +896,9 @@ fn override_rustc_crate_types(
             unit.kind,
             unit.mode,
             unit.features.clone(),
+            unit.rustflags.clone(),
+            unit.rustdocflags.clone(),
+            unit.links_overrides.clone(),
             unit.is_std,
             unit.dep_hash,
             unit.artifact,

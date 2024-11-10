@@ -2,6 +2,7 @@
 //!
 //! Note: Some tests are located in the resolver-tests package.
 
+use cargo_test_support::prelude::*;
 use cargo_test_support::project;
 use cargo_test_support::registry::Package;
 use cargo_test_support::str;
@@ -33,8 +34,8 @@ fn minimal_version_cli() {
         .masquerade_as_nightly_cargo(&["minimal-versions"])
         .with_stderr_data(str![[r#"
 [UPDATING] `dummy-registry` index
-[LOCKING] 2 packages to earliest compatible versions
-[ADDING] dep v1.0.0 (latest: v1.1.0)
+[LOCKING] 1 package to earliest compatible version
+[ADDING] dep v1.0.0 (available: v1.1.0)
 
 "#]])
         .run();

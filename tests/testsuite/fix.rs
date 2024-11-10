@@ -1,11 +1,10 @@
 //! Tests for the `cargo fix` command.
 
-#![allow(deprecated)]
-
 use cargo::core::Edition;
 use cargo_test_support::compare::assert_e2e;
 use cargo_test_support::git::{self, init};
-use cargo_test_support::paths::{self, CargoPathExt};
+use cargo_test_support::paths;
+use cargo_test_support::prelude::*;
 use cargo_test_support::registry::{Dependency, Package};
 use cargo_test_support::str;
 use cargo_test_support::tools;
@@ -32,7 +31,11 @@ fn do_not_fix_broken_builds() {
     p.cargo("fix --allow-no-vcs")
         .env("__CARGO_FIX_YOLO", "1")
         .with_status(101)
-        .with_stderr_contains("[ERROR] could not compile `foo` (lib) due to 1 previous error[..]")
+        .with_stderr_data(str![[r#"
+...
+[ERROR] could not compile `foo` (lib) due to 1 previous error; 1 warning emitted
+...
+"#]])
         .run();
     assert!(p.read_file("src/lib.rs").contains("let mut x = 3;"));
 }
@@ -98,16 +101,17 @@ fn fix_path_deps() {
 
     p.cargo("fix --allow-no-vcs -p foo -p bar")
         .env("__CARGO_FIX_YOLO", "1")
-        .with_stdout("")
-        .with_stderr_unordered(
-            "\
-[LOCKING] 2 packages to latest compatible versions
-[CHECKING] bar v0.1.0 ([..])
+        .with_stdout_data("")
+        .with_stderr_data(
+            str![[r#"
+[CHECKING] bar v0.1.0 ([ROOT]/foo/bar)
 [FIXED] bar/src/lib.rs (1 fix)
-[CHECKING] foo v0.1.0 ([..])
+[CHECKING] foo v0.1.0 ([ROOT]/foo)
 [FIXED] src/lib.rs (1 fix)
-[FINISHED] [..]
-",
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]]
+            .unordered(),
         )
         .run();
 }
@@ -174,16 +178,16 @@ fn prepare_for_2018() {
         )
         .build();
 
-    let stderr = "\
+    p.cargo("fix --edition --allow-no-vcs")
+        .with_stderr_data(str![[r#"
 [MIGRATING] Cargo.toml from 2015 edition to 2018
-[CHECKING] foo v0.0.1 ([..])
+[CHECKING] foo v0.0.1 ([ROOT]/foo)
 [MIGRATING] src/lib.rs from 2015 edition to 2018
 [FIXED] src/lib.rs (2 fixes)
-[FINISHED] [..]
-";
-    p.cargo("fix --edition --allow-no-vcs")
-        .with_stderr(stderr)
-        .with_stdout("")
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
+        .with_stdout_data("")
         .run();
 
     println!("{}", p.read_file("src/lib.rs"));
@@ -213,16 +217,15 @@ fn local_paths() {
         .build();
 
     p.cargo("fix --edition --allow-no-vcs")
-        .with_stderr(
-            "\
+        .with_stderr_data(str![[r#"
 [MIGRATING] Cargo.toml from 2015 edition to 2018
-[CHECKING] foo v0.0.1 ([..])
+[CHECKING] foo v0.0.1 ([ROOT]/foo)
 [MIGRATING] src/lib.rs from 2015 edition to 2018
 [FIXED] src/lib.rs (1 fix)
-[FINISHED] [..]
-",
-        )
-        .with_stdout("")
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
+        .with_stdout_data("")
         .run();
 
     println!("{}", p.read_file("src/lib.rs"));
@@ -264,17 +267,16 @@ fn upgrade_extern_crate() {
         .file("bar/src/lib.rs", "pub fn bar() {}")
         .build();
 
-    let stderr = "\
-[LOCKING] 2 packages to latest compatible versions
-[CHECKING] bar v0.1.0 ([..])
-[CHECKING] foo v0.1.0 ([..])
-[FIXED] src/lib.rs (1 fix)
-[FINISHED] [..]
-";
     p.cargo("fix --allow-no-vcs")
         .env("__CARGO_FIX_YOLO", "1")
-        .with_stderr(stderr)
-        .with_stdout("")
+        .with_stderr_data(str![[r#"
+[CHECKING] bar v0.1.0 ([ROOT]/foo/bar)
+[CHECKING] foo v0.1.0 ([ROOT]/foo)
+[FIXED] src/lib.rs (1 fix)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
+        .with_stdout_data("")
         .run();
     println!("{}", p.read_file("src/lib.rs"));
     assert!(!p.read_file("src/lib.rs").contains("extern crate"));
@@ -301,16 +303,15 @@ fn specify_rustflags() {
 
     p.cargo("fix --edition --allow-no-vcs")
         .env("RUSTFLAGS", "-C linker=cc")
-        .with_stderr(
-            "\
+        .with_stderr_data(str![[r#"
 [MIGRATING] Cargo.toml from 2015 edition to 2018
-[CHECKING] foo v0.0.1 ([..])
+[CHECKING] foo v0.0.1 ([ROOT]/foo)
 [MIGRATING] src/lib.rs from 2015 edition to 2018
 [FIXED] src/lib.rs (1 fix)
-[FINISHED] [..]
-",
-        )
-        .with_stdout("")
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
+        .with_stdout_data("")
         .run();
 }
 
@@ -318,13 +319,13 @@ fn specify_rustflags() {
 fn no_changes_necessary() {
     let p = project().file("src/lib.rs", "").build();
 
-    let stderr = "\
-[CHECKING] foo v0.0.1 ([..])
-[FINISHED] [..]
-";
     p.cargo("fix --allow-no-vcs")
-        .with_stderr(stderr)
-        .with_stdout("")
+        .with_stderr_data(str![[r#"
+[CHECKING] foo v0.0.1 ([ROOT]/foo)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
+        .with_stdout_data("")
         .run();
 }
 
@@ -342,15 +343,15 @@ fn fixes_extra_mut() {
         )
         .build();
 
-    let stderr = "\
-[CHECKING] foo v0.0.1 ([..])
-[FIXED] src/lib.rs (1 fix)
-[FINISHED] [..]
-";
     p.cargo("fix --allow-no-vcs")
         .env("__CARGO_FIX_YOLO", "1")
-        .with_stderr(stderr)
-        .with_stdout("")
+        .with_stderr_data(str![[r#"
+[CHECKING] foo v0.0.1 ([ROOT]/foo)
+[FIXED] src/lib.rs (1 fix)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
+        .with_stdout_data("")
         .run();
 }
 
@@ -369,15 +370,15 @@ fn fixes_two_missing_ampersands() {
         )
         .build();
 
-    let stderr = "\
-[CHECKING] foo v0.0.1 ([..])
-[FIXED] src/lib.rs (2 fixes)
-[FINISHED] [..]
-";
     p.cargo("fix --allow-no-vcs")
         .env("__CARGO_FIX_YOLO", "1")
-        .with_stderr(stderr)
-        .with_stdout("")
+        .with_stderr_data(str![[r#"
+[CHECKING] foo v0.0.1 ([ROOT]/foo)
+[FIXED] src/lib.rs (2 fixes)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
+        .with_stdout_data("")
         .run();
 }
 
@@ -395,15 +396,15 @@ fn tricky() {
         )
         .build();
 
-    let stderr = "\
-[CHECKING] foo v0.0.1 ([..])
-[FIXED] src/lib.rs (2 fixes)
-[FINISHED] [..]
-";
     p.cargo("fix --allow-no-vcs")
         .env("__CARGO_FIX_YOLO", "1")
-        .with_stderr(stderr)
-        .with_stdout("")
+        .with_stderr_data(str![[r#"
+[CHECKING] foo v0.0.1 ([ROOT]/foo)
+[FIXED] src/lib.rs (2 fixes)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
+        .with_stdout_data("")
         .run();
 }
 
@@ -496,8 +497,16 @@ fn fix_two_files() {
 
     p.cargo("fix --allow-no-vcs")
         .env("__CARGO_FIX_YOLO", "1")
-        .with_stderr_contains("[FIXED] src/bar.rs (1 fix)")
-        .with_stderr_contains("[FIXED] src/lib.rs (1 fix)")
+        .with_stderr_data(
+            str![[r#"
+[CHECKING] foo v0.0.1 ([ROOT]/foo)
+[FIXED] src/bar.rs (1 fix)
+[FIXED] src/lib.rs (1 fix)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]]
+            .unordered(),
+        )
         .run();
     assert!(!p.read_file("src/lib.rs").contains("let mut x = 3;"));
     assert!(!p.read_file("src/bar.rs").contains("let mut x = 3;"));
@@ -529,19 +538,25 @@ fn fixes_missing_ampersand() {
 
     p.cargo("fix --all-targets --allow-no-vcs")
         .env("__CARGO_FIX_YOLO", "1")
-        .with_stdout("")
-        .with_stderr_contains("[COMPILING] foo v0.0.1 ([..])")
-        .with_stderr_contains("[FIXED] build.rs (1 fix)")
-        // Don't assert number of fixes for this one, as we don't know if we're
+        .with_stdout_data("")
+        // Don't assert number of fixes for `src/lib.rs`, as we don't know if we're
         // fixing it once or twice! We run this all concurrently, and if we
         // compile (and fix) in `--test` mode first, we get two fixes. Otherwise
         // we'll fix one non-test thing, and then fix another one later in
         // test mode.
-        .with_stderr_contains("[FIXED] src/lib.rs[..]")
-        .with_stderr_contains("[FIXED] src/main.rs (1 fix)")
-        .with_stderr_contains("[FIXED] examples/foo.rs (1 fix)")
-        .with_stderr_contains("[FIXED] tests/a.rs (1 fix)")
-        .with_stderr_contains("[FINISHED] [..]")
+        .with_stderr_data(
+            str![[r#"
+[COMPILING] foo v0.0.1 ([ROOT]/foo)
+[FIXED] build.rs (1 fix)
+[FIXED] src/lib.rs ([..]fix[..])
+[FIXED] src/main.rs (1 fix)
+[FIXED] examples/foo.rs (1 fix)
+[FIXED] tests/a.rs (1 fix)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+...
+"#]]
+            .unordered(),
+        )
         .run();
     p.cargo("check").run();
     p.cargo("test").run();
@@ -589,7 +604,11 @@ fn shows_warnings() {
         .build();
 
     p.cargo("fix --allow-no-vcs")
-        .with_stderr_contains("[..]warning: use of deprecated[..]")
+        .with_stderr_data(str![[r#"
+...
+[WARNING] use of deprecated function `bar`
+...
+"#]])
         .run();
 }
 
@@ -599,11 +618,10 @@ fn warns_if_no_vcs_detected() {
 
     p.cargo("fix")
         .with_status(101)
-        .with_stderr(
-            "error: no VCS found for this package and `cargo fix` can potentially perform \
-             destructive changes; if you'd like to suppress this error pass `--allow-no-vcs`\
-             ",
-        )
+        .with_stderr_data(str![[r#"
+[ERROR] no VCS found for this package and `cargo fix` can potentially perform destructive changes; if you'd like to suppress this error pass `--allow-no-vcs`
+
+"#]])
         .run();
     p.cargo("fix --allow-no-vcs").run();
 }
@@ -616,18 +634,14 @@ fn warns_about_dirty_working_directory() {
 
     p.cargo("fix")
         .with_status(101)
-        .with_stderr(
-            "\
-error: the working directory of this package has uncommitted changes, \
-and `cargo fix` can potentially perform destructive changes; if you'd \
-like to suppress this error pass `--allow-dirty`, `--allow-staged`, or \
-commit the changes to these files:
+        .with_stderr_data(str![[r#"
+[ERROR] the working directory of this package has uncommitted changes, and `cargo fix` can potentially perform destructive changes; if you'd like to suppress this error pass `--allow-dirty`, `--allow-staged`, or commit the changes to these files:
 
   * src/lib.rs (dirty)
 
 
-",
-        )
+
+"#]])
         .run();
     p.cargo("fix --allow-dirty").run();
 }
@@ -641,18 +655,14 @@ fn warns_about_staged_working_directory() {
 
     p.cargo("fix")
         .with_status(101)
-        .with_stderr(
-            "\
-error: the working directory of this package has uncommitted changes, \
-and `cargo fix` can potentially perform destructive changes; if you'd \
-like to suppress this error pass `--allow-dirty`, `--allow-staged`, or \
-commit the changes to these files:
+        .with_stderr_data(str![[r#"
+[ERROR] the working directory of this package has uncommitted changes, and `cargo fix` can potentially perform destructive changes; if you'd like to suppress this error pass `--allow-dirty`, `--allow-staged`, or commit the changes to these files:
 
   * src/lib.rs (staged)
 
 
-",
-        )
+
+"#]])
         .run();
     p.cargo("fix --allow-staged").run();
 }
@@ -666,19 +676,15 @@ fn errors_about_untracked_files() {
 
     p.cargo("fix")
         .with_status(101)
-        .with_stderr(
-            "\
-error: the working directory of this package has uncommitted changes, \
-and `cargo fix` can potentially perform destructive changes; if you'd \
-like to suppress this error pass `--allow-dirty`, `--allow-staged`, or \
-commit the changes to these files:
+        .with_stderr_data(str![[r#"
+[ERROR] the working directory of this package has uncommitted changes, and `cargo fix` can potentially perform destructive changes; if you'd like to suppress this error pass `--allow-dirty`, `--allow-staged`, or commit the changes to these files:
 
   * Cargo.toml (dirty)
   * src/ (dirty)
 
 
-",
-        )
+
+"#]])
         .run();
     p.cargo("fix --allow-dirty").run();
 }
@@ -747,8 +753,8 @@ fn prepare_for_unstable() {
     // -j1 to make the error more deterministic (otherwise there can be
     // multiple errors since they run in parallel).
     p.cargo("fix --edition --allow-no-vcs -j1")
-        .with_stderr(&format_args!("\
-[CHECKING] foo [..]
+        .with_stderr_data(&format!("\
+[CHECKING] foo v0.1.0 ([ROOT]/foo)
 [WARNING] `src/lib.rs` is on the latest edition, but trying to migrate to edition {next}.
 Edition {next} is unstable and not allowed in this release, consider trying the nightly release channel.
 
@@ -763,7 +769,7 @@ process requires following these steps:
 More details may be found at
 https://doc.rust-lang.org/edition-guide/editions/transitioning-an-existing-project-to-a-new-edition.html
 
-[FINISHED] [..]
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 ", next=next, latest_stable=latest_stable, prev=prev))
         .run();
 
@@ -774,12 +780,12 @@ https://doc.rust-lang.org/edition-guide/editions/transitioning-an-existing-proje
 
     p.cargo("fix --edition --allow-no-vcs")
         .masquerade_as_nightly_cargo(&["always_nightly"])
-        .with_stderr(&format!(
+        .with_stderr_data(&format!(
             "\
 [MIGRATING] Cargo.toml from {latest_stable} edition to {next}
-[CHECKING] foo [..]
+[CHECKING] foo v0.1.0 ([ROOT]/foo)
 [MIGRATING] src/lib.rs from {latest_stable} edition to {next}
-[FINISHED] [..]
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 ",
             latest_stable = latest_stable,
             next = next,
@@ -809,12 +815,12 @@ fn prepare_for_latest_stable() {
         .build();
 
     p.cargo("fix --edition --allow-no-vcs")
-        .with_stderr(&format!(
+        .with_stderr_data(&format!(
             "\
 [MIGRATING] Cargo.toml from {previous} edition to {latest_stable}
-[CHECKING] foo [..]
+[CHECKING] foo v0.1.0 ([ROOT]/foo)
 [MIGRATING] src/lib.rs from {previous} edition to {latest_stable}
-[FINISHED] [..]
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 ",
         ))
         .run();
@@ -852,10 +858,11 @@ fn prepare_for_already_on_latest_unstable() {
 
     p.cargo("fix --edition --allow-no-vcs")
         .masquerade_as_nightly_cargo(&["always_nightly"])
-        .with_stderr_contains("[CHECKING] foo [..]")
-        .with_stderr_contains(&format!(
+        .with_stderr_data(&format!(
             "\
+[CHECKING] foo v0.1.0 ([ROOT]/foo)
 [WARNING] `src/lib.rs` is already on the latest edition ({next_edition}), unable to migrate further
+...
 ",
             next_edition = next_edition
         ))
@@ -916,15 +923,14 @@ fn fix_overlapping() {
         .build();
 
     p.cargo("fix --allow-no-vcs --edition --lib")
-        .with_stderr(
-            "\
+        .with_stderr_data(str![[r#"
 [MIGRATING] Cargo.toml from 2015 edition to 2018
-[CHECKING] foo [..]
+[CHECKING] foo v0.0.1 ([ROOT]/foo)
 [MIGRATING] src/lib.rs from 2015 edition to 2018
 [FIXED] src/lib.rs (2 fixes)
-[FINISHED] `dev` profile [..]
-",
-        )
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
         .run();
 
     let contents = p.read_file("src/lib.rs");
@@ -955,13 +961,13 @@ fn fix_idioms() {
         )
         .build();
 
-    let stderr = "\
-[CHECKING] foo [..]
-[FIXED] src/lib.rs (1 fix)
-[FINISHED] [..]
-";
     p.cargo("fix --edition-idioms --allow-no-vcs")
-        .with_stderr(stderr)
+        .with_stderr_data(str![[r#"
+[CHECKING] foo v0.1.0 ([ROOT]/foo)
+[FIXED] src/lib.rs (1 fix)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
         .run();
 
     assert!(p.read_file("src/lib.rs").contains("Box<dyn Any>"));
@@ -991,11 +997,19 @@ fn shows_warnings_on_second_run_without_changes() {
         .build();
 
     p.cargo("fix --allow-no-vcs")
-        .with_stderr_contains("[..]warning: use of deprecated[..]")
+        .with_stderr_data(str![[r#"
+...
+[WARNING] use of deprecated function `bar`
+...
+"#]])
         .run();
 
     p.cargo("fix --allow-no-vcs")
-        .with_stderr_contains("[..]warning: use of deprecated[..]")
+        .with_stderr_data(str![[r#"
+...
+[WARNING] use of deprecated function `bar`
+...
+"#]])
         .run();
 }
 
@@ -1062,19 +1076,42 @@ fn shows_warnings_on_second_run_without_changes_on_multiple_targets() {
         .build();
 
     p.cargo("fix --allow-no-vcs --all-targets")
-        .with_stderr_contains(" --> examples/fooxample.rs:6:29")
-        .with_stderr_contains(" --> src/lib.rs:6:29")
-        .with_stderr_contains(" --> src/main.rs:6:29")
-        .with_stderr_contains(" --> tests/bar.rs:7:29")
-        .with_stderr_contains(" --> tests/foo.rs:7:29")
+        .with_stderr_data(
+            str![[r#"
+...
+ --> src/lib.rs:6:29
+...
+ --> src/main.rs:6:29
+...
+ --> examples/fooxample.rs:6:29
+...
+ --> tests/foo.rs:7:29
+...
+ --> tests/bar.rs:7:29
+...
+
+"#]]
+            .unordered(),
+        )
         .run();
 
     p.cargo("fix --allow-no-vcs --all-targets")
-        .with_stderr_contains(" --> examples/fooxample.rs:6:29")
-        .with_stderr_contains(" --> src/lib.rs:6:29")
-        .with_stderr_contains(" --> src/main.rs:6:29")
-        .with_stderr_contains(" --> tests/bar.rs:7:29")
-        .with_stderr_contains(" --> tests/foo.rs:7:29")
+        .with_stderr_data(
+            str![[r#"
+...
+ --> src/lib.rs:6:29
+...
+ --> src/main.rs:6:29
+...
+ --> examples/fooxample.rs:6:29
+...
+ --> tests/bar.rs:7:29
+...
+ --> tests/foo.rs:7:29
+...
+"#]]
+            .unordered(),
+        )
         .run();
 }
 
@@ -1102,26 +1139,23 @@ fn doesnt_rebuild_dependencies() {
 
     p.cargo("fix --allow-no-vcs -p foo")
         .env("__CARGO_FIX_YOLO", "1")
-        .with_stdout("")
-        .with_stderr(
-            "\
-[LOCKING] 2 packages to latest compatible versions
-[CHECKING] bar v0.1.0 ([..])
-[CHECKING] foo v0.1.0 ([..])
-[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [..]
-",
-        )
+        .with_stdout_data("")
+        .with_stderr_data(str![[r#"
+[CHECKING] bar v0.1.0 ([ROOT]/foo/bar)
+[CHECKING] foo v0.1.0 ([ROOT]/foo)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
         .run();
 
     p.cargo("fix --allow-no-vcs -p foo")
         .env("__CARGO_FIX_YOLO", "1")
-        .with_stdout("")
-        .with_stderr(
-            "\
-[CHECKING] foo v0.1.0 ([..])
-[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [..]
-",
-        )
+        .with_stdout_data("")
+        .with_stderr_data(str![[r#"
+[CHECKING] foo v0.1.0 ([ROOT]/foo)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
         .run();
 }
 
@@ -1166,7 +1200,11 @@ fn uses_workspace_wrapper_and_primary_wrapper_override() {
 
     p.cargo("fix --allow-no-vcs --verbose")
         .env("RUSTC_WORKSPACE_WRAPPER", tools::echo_wrapper())
-        .with_stderr_contains("WRAPPER CALLED: rustc src/lib.rs --crate-name foo [..]")
+        .with_stderr_data(str![[r#"
+...
+WRAPPER CALLED: rustc src/lib.rs --crate-name foo [..]
+...
+"#]])
         .run();
 }
 
@@ -1208,16 +1246,15 @@ fn only_warn_for_relevant_crates() {
         .build();
 
     p.cargo("fix --allow-no-vcs --edition")
-        .with_stderr(
-            "\
+        .with_stderr_data(str![[r#"
 [MIGRATING] Cargo.toml from 2015 edition to 2018
-[LOCKING] 2 packages to latest compatible versions
-[CHECKING] a v0.1.0 ([..])
-[CHECKING] foo v0.1.0 ([..])
+[LOCKING] 1 package to latest compatible version
+[CHECKING] a v0.1.0 ([ROOT]/foo/a)
+[CHECKING] foo v0.1.0 ([ROOT]/foo)
 [MIGRATING] src/lib.rs from 2015 edition to 2018
-[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [..]
-",
-        )
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
         .run();
 }
 
@@ -1294,7 +1331,11 @@ fn fix_to_broken_code() {
         .cwd("bar")
         .env("RUSTC", p.root().join("foo/target/debug/foo"))
         .with_status(101)
-        .with_stderr_contains("[WARNING] failed to automatically apply fixes [..]")
+        .with_stderr_data(str![[r#"
+...
+[WARNING] failed to automatically apply fixes suggested by rustc to crate `bar`
+...
+"#]])
         .run();
 
     assert_e2e().eq(
@@ -1342,7 +1383,10 @@ fn fix_in_existing_repo_weird_ignore() {
     // ignored.
     p.cargo("fix")
         .cwd("inner")
-        .with_stderr_contains("[ERROR] no VCS found[..]")
+        .with_stderr_data(str![[r#"
+[ERROR] no VCS found for this package and `cargo fix` can potentially perform destructive changes; if you'd like to suppress this error pass `--allow-no-vcs`
+
+"#]])
         .with_status(101)
         .run();
     p.cargo("fix").cwd("src").run();
@@ -1356,12 +1400,22 @@ fn fix_color_message() {
         .build();
 
     p.cargo("fix --allow-no-vcs --color=always")
-        .with_stderr_contains("[..]\x1b[[..]")
+        .with_stderr_data(
+            "\
+...
+[..]\x1b[[..]
+...
+",
+        )
         .with_status(101)
         .run();
 
     p.cargo("fix --allow-no-vcs --color=never")
-        .with_stderr_contains("error: color test")
+        .with_stderr_data(str![[r#"
+...
+[ERROR] color test
+...
+"#]])
         .with_stderr_does_not_contain("[..]\x1b[[..]")
         .with_status(101)
         .run();
@@ -1409,15 +1463,15 @@ fn edition_v2_resolver_report() {
         .build();
 
     p.cargo("fix --edition --allow-no-vcs")
-        .with_stderr_unordered("\
+        .with_stderr_data(str![[r#"
 [MIGRATING] Cargo.toml from 2018 edition to 2021
-[UPDATING] [..]
-[LOCKING] 4 packages to latest compatible versions
+[UPDATING] `dummy-registry` index
+[LOCKING] 3 packages to latest compatible versions
 [DOWNLOADING] crates ...
-[DOWNLOADED] common v1.0.0 [..]
-[DOWNLOADED] bar v1.0.0 [..]
-[DOWNLOADED] opt_dep v1.0.0 [..]
-note: Switching to Edition 2021 will enable the use of the version 2 feature resolver in Cargo.
+[DOWNLOADED] common v1.0.0 (registry `dummy-registry`)
+[DOWNLOADED] bar v1.0.0 (registry `dummy-registry`)
+[DOWNLOADED] opt_dep v1.0.0 (registry `dummy-registry`)
+[NOTE] Switching to Edition 2021 will enable the use of the version 2 feature resolver in Cargo.
 This may cause some dependencies to be built with fewer features enabled than previously.
 More information about the resolver changes may be found at https://doc.rust-lang.org/nightly/edition-guide/rust-2021/default-cargo-resolver.html
 When building the following dependencies, the given features will no longer be used:
@@ -1432,10 +1486,11 @@ The following differences only apply when building with dev-dependencies:
 [CHECKING] opt_dep v1.0.0
 [CHECKING] common v1.0.0
 [CHECKING] bar v1.0.0
-[CHECKING] foo v0.1.0 [..]
+[CHECKING] foo v0.1.0 ([ROOT]/foo)
 [MIGRATING] src/lib.rs from 2018 edition to 2021
-[FINISHED] [..]
-")
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]].unordered())
         .run();
 }
 
@@ -1488,15 +1543,14 @@ fn fix_edition_2021() {
         )
         .build();
     p.cargo("fix --edition --allow-no-vcs")
-        .with_stderr(
-            "\
+        .with_stderr_data(str![[r#"
 [MIGRATING] Cargo.toml from 2018 edition to 2021
-[CHECKING] foo v0.1.0 [..]
+[CHECKING] foo v0.1.0 ([ROOT]/foo)
 [MIGRATING] src/lib.rs from 2018 edition to 2021
 [FIXED] src/lib.rs (1 fix)
-[FINISHED] [..]
-",
-        )
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
         .run();
     assert!(p.read_file("src/lib.rs").contains(r#"0..=100 => true,"#));
 }
@@ -1532,14 +1586,15 @@ fn fix_shared_cross_workspace() {
     //     [FIXED] foo/src/shared.rs (2 fixes)
     p.cargo("fix --allow-no-vcs")
         .env("__CARGO_FIX_YOLO", "1")
-        .with_stderr_unordered(
-            "\
-[LOCKING] 2 packages to latest compatible versions
-[CHECKING] foo v0.1.0 [..]
-[CHECKING] bar v0.1.0 [..]
+        .with_stderr_data(
+            str![[r#"
+[CHECKING] foo v0.1.0 ([ROOT]/foo/foo)
+[CHECKING] bar v0.1.0 ([ROOT]/foo/bar)
 [FIXED] [..]foo/src/shared.rs (2 fixes)
-[FINISHED] [..]
-",
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]]
+            .unordered(),
         )
         .run();
 
@@ -1618,13 +1673,16 @@ fn abnormal_exit() {
             "ONCE_PATH",
             paths::root().join("proc-macro-run-once").to_str().unwrap(),
         )
-        .with_stderr_contains(
-            "[WARNING] failed to automatically apply fixes suggested by rustc to crate `foo`",
-        )
-        .with_stderr_contains("I'm not a diagnostic.")
         // "signal: 6, SIGABRT: process abort signal" on some platforms
-        .with_stderr_contains("rustc exited abnormally: [..]")
-        .with_stderr_contains("Original diagnostics will follow.")
+        .with_stderr_data(str![[r#"
+...
+[WARNING] failed to automatically apply fixes suggested by rustc to crate `foo`
+...
+I'm not a diagnostic.
+rustc exited abnormally: [..]
+Original diagnostics will follow.
+...
+"#]])
         .run();
 }
 
@@ -1705,8 +1763,13 @@ fn non_edition_lint_migration() {
         .build();
     // Check that it complains about an unused import.
     p.cargo("check --lib")
-        .with_stderr_contains("[..]unused_imports[..]")
-        .with_stderr_contains("[..]std::str::from_utf8[..]")
+        .with_stderr_data(str![[r#"
+...
+[..]use std::str::from_utf8;
+...
+  = [NOTE] `#[warn(unused_imports)]` on by default
+...
+"#]])
         .run();
     p.cargo("fix --edition --allow-no-vcs").run();
     let contents = p.read_file("src/lib.rs");
@@ -1895,20 +1958,21 @@ fn fix_in_dependency() {
     // compiler output.
     p.cargo("fix --lib --allow-no-vcs")
         .env("RUSTC", &rustc_bin)
-        .with_stderr("\
+        .with_stderr_data(str![[r#"
 [CHECKING] bar v1.0.0
-[CHECKING] foo v0.1.0 [..]
-warning: unused variable: `abc`
- --> [ROOT]/home/.cargo/registry/src/[..]/bar-1.0.0/src/lib.rs:5:29
+[CHECKING] foo v0.1.0 ([ROOT]/foo)
+[WARNING] unused variable: `abc`
+ --> [ROOT]/home/.cargo/registry/src/-[HASH]/bar-1.0.0/src/lib.rs:5:29
   |
 5 |                         let $i = 1;
-  |                             ^^ help: if this is intentional, prefix it with an underscore: `_abc`
+  |                             ^^ [HELP] if this is intentional, prefix it with an underscore: `_abc`
   |
-  = note: `#[warn(unused_variables)]` on by default
+  = [NOTE] `#[warn(unused_variables)]` on by default
 
-warning: `foo` (lib) generated 1 warning (run `cargo fix --lib -p foo` to apply 1 suggestion)
-[FINISHED] [..]
-")
+[WARNING] `foo` (lib) generated 1 warning (run `cargo fix --lib -p foo` to apply 1 suggestion)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
         .run();
 }
 
@@ -2205,7 +2269,8 @@ fn fix_in_rust_src() {
         .env("__CARGO_FIX_YOLO", "1")
         .env("RUSTC", &rustc_bin)
         .with_status(101)
-        .with_stderr(r#"[CHECKING] foo v0.0.0 ([..])
+        .with_stderr_data(str![[r#"
+[CHECKING] foo v0.0.0 ([ROOT]/foo)
 error[E0308]: mismatched types
  --> lib.rs:5:9
   |
@@ -2217,70 +2282,76 @@ error[E0308]: mismatched types
 6 | |     }
   | |_____- expected this to be `()`
   |
-  = note: expected unit type `()`
+  = [NOTE] expected unit type `()`
                   found enum `Result<(), std::fmt::Error>`
-  = note: this error originates in the macro `writeln` (in Nightly builds, run with -Z macro-backtrace for more info)
-help: consider using a semicolon here
+  = [NOTE] this error originates in the macro `writeln` (in Nightly builds, run with -Z macro-backtrace for more info)
+[HELP] consider using a semicolon here
   |
 6 |     };
   |      +
-help: you might have meant to return this value
+[HELP] you might have meant to return this value
   |
 5 |         return writeln!(w, "but not here");
   |         ++++++                            +
-help: use the `?` operator to extract the `Result<(), std::fmt::Error>` value, propagating a `Result::Err` value to the caller
+[HELP] use the `?` operator to extract the `Result<(), std::fmt::Error>` value, propagating a `Result::Err` value to the caller
  --> [..]/lib/rustlib/src/rust/library/core/src/macros/mod.rs:670:58
   |
 67|         $dst.write_fmt($crate::format_args_nl!($($arg)*))?
   |                                                          +
 
 [ERROR] could not compile `foo` (lib) due to 1 previous error
-"#)
+
+"#]])
         .run();
 }
 
-// This fixes rust-lang/rust#123304.
-// If that lint stops emitting duplicate suggestions,
-// we might need to find a substitution.
+// See <https://github.com/rust-lang/cargo/issues/13027>
 #[cargo_test]
 fn fix_only_once_for_duplicates() {
     let p = project()
         .file(
-            "src/lib.rs",
+            "src/main.rs",
             r#"
-                #![warn(unsafe_op_in_unsafe_fn)]
+macro_rules! foo {
+    () => {
+        &1;
+    };
+}
 
-                macro_rules! foo {
-                    ($x:ident) => {
-                        pub unsafe fn $x() {
-                            let _ = String::new().as_mut_vec();
-                        }
-                    };
-                }
-
-                foo!(a);
-                foo!(b);
-            "#,
+fn main() {
+    foo!();
+    foo!();
+}
+"#,
         )
         .build();
 
     p.cargo("fix --allow-no-vcs")
-        .with_stderr(
-            "\
-[CHECKING] foo v0.0.1 ([CWD])
-[FIXED] src/lib.rs (1 fix)
-[FINISHED] `dev` profile [..]
-",
-        )
+        .env("__CARGO_FIX_YOLO", "1")
+        .with_stderr_data(str![[r#"
+[CHECKING] foo v0.0.1 ([ROOT]/foo)
+[FIXED] src/main.rs (1 fix)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
         .run();
 
-    assert_eq!(
-        p.read_file("src/lib.rs").matches("unsafe").count(),
-        4,
-        "unsafe keyword in src/lib.rs:\n\
-            2 in lint name;\n\
-            1 from original unsafe fn;\n\
-            1 from newly-applied unsafe blocks"
+    assert_e2e().eq(
+        p.read_file("src/main.rs"),
+        str![[r#"
+
+macro_rules! foo {
+    () => {
+        let _ = &1;
+    };
+}
+
+fn main() {
+    foo!();
+    foo!();
+}
+
+"#]],
     );
 }
 
@@ -2305,15 +2376,14 @@ edition = "2021"
 
     p.cargo("fix --edition --allow-no-vcs")
         .masquerade_as_nightly_cargo(&["edition2024"])
-        .with_stderr(
-            "\
+        .with_stderr_data(str![[r#"
 [MIGRATING] Cargo.toml from 2021 edition to 2024
 [FIXED] Cargo.toml (1 fix)
-[CHECKING] foo v0.0.0 ([CWD])
+[CHECKING] foo v0.0.0 ([ROOT]/foo)
 [MIGRATING] src/lib.rs from 2021 edition to 2024
-[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [..]s
-",
-        )
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
         .run();
     assert_e2e().eq(
         p.read_file("Cargo.toml"),
@@ -2360,15 +2430,14 @@ edition = "2021"
 
     p.cargo("fix --edition --allow-no-vcs")
         .masquerade_as_nightly_cargo(&["edition2024"])
-        .with_stderr(
-            "\
+        .with_stderr_data(str![[r#"
 [MIGRATING] Cargo.toml from 2021 edition to 2024
 [FIXED] Cargo.toml (1 fix)
-[CHECKING] foo v0.0.0 ([CWD])
+[CHECKING] foo v0.0.0 ([ROOT]/foo)
 [MIGRATING] src/lib.rs from 2021 edition to 2024
-[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [..]s
-",
-        )
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
         .run();
     assert_e2e().eq(
         p.read_file("Cargo.toml"),
@@ -2463,18 +2532,16 @@ a = {path = "a", default_features = false}
 
     p.cargo("fix --edition --allow-no-vcs")
         .masquerade_as_nightly_cargo(&["edition2024"])
-        .with_stderr(
-            "\
+        .with_stderr_data(str![[r#"
 [MIGRATING] Cargo.toml from 2021 edition to 2024
 [FIXED] Cargo.toml (11 fixes)
-     Locking 2 packages to latest compatible versions
-    Checking a v0.0.1 ([CWD]/a)
-[CHECKING] foo v0.0.0 ([CWD])
+[CHECKING] a v0.0.1 ([ROOT]/foo/a)
+[CHECKING] foo v0.0.0 ([ROOT]/foo)
 [MIGRATING] src/lib.rs from 2021 edition to 2024
 [MIGRATING] examples/ex.rs from 2021 edition to 2024
-[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [..]s
-",
-        )
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
         .run();
     assert_e2e().eq(
         p.read_file("Cargo.toml"),
@@ -2527,215 +2594,6 @@ a = {path = "a", default-features = false}
 # After build_dependencies line
 a = {path = "a", default-features = false}
 # After build_dependencies table
-
-"#]],
-    );
-}
-
-#[cargo_test]
-fn add_feature_for_unused_dep() {
-    Package::new("regular-dep", "0.1.0").publish();
-    Package::new("build-dep", "0.1.0").publish();
-    Package::new("target-dep", "0.1.0").publish();
-    let p = project()
-        .file(
-            "Cargo.toml",
-            r#"
-[package]
-name = "foo"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-regular-dep = { version = "0.1.0", optional = true }
-
-[build-dependencies]
-build-dep = { version = "0.1.0", optional = true }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-target-dep = { version = "0.1.0", optional = true }
-"#,
-        )
-        .file("src/lib.rs", "")
-        .build();
-
-    p.cargo("fix --edition --allow-no-vcs")
-        .masquerade_as_nightly_cargo(&["edition2024"])
-        .with_stderr(
-            "\
-[MIGRATING] Cargo.toml from 2021 edition to 2024
-[FIXED] Cargo.toml (3 fixes)
-[UPDATING] `dummy-registry` index
-[LOCKING] 4 packages to latest compatible versions
-[CHECKING] foo v0.1.0 ([CWD])
-[MIGRATING] src/lib.rs from 2021 edition to 2024
-[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [..]s
-",
-        )
-        .run();
-    assert_e2e().eq(
-        p.read_file("Cargo.toml"),
-        str![[r#"
-
-[package]
-name = "foo"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-regular-dep = { version = "0.1.0", optional = true }
-
-[build-dependencies]
-build-dep = { version = "0.1.0", optional = true }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-target-dep = { version = "0.1.0", optional = true }
-
-[features]
-regular-dep = ["dep:regular-dep"]
-build-dep = ["dep:build-dep"]
-target-dep = ["dep:target-dep"]
-
-"#]],
-    );
-}
-
-#[cargo_test]
-fn add_feature_for_unused_dep_existing_table() {
-    Package::new("dep", "0.1.0").publish();
-    let p = project()
-        .file(
-            "Cargo.toml",
-            r#"
-[package]
-name = "foo"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-dep = { version = "0.1.0", optional = true }
-
-[features]
-existing = []
-"#,
-        )
-        .file("src/lib.rs", "")
-        .build();
-
-    p.cargo("fix --edition --allow-no-vcs")
-        .masquerade_as_nightly_cargo(&["edition2024"])
-        .with_stderr(
-            "\
-[MIGRATING] Cargo.toml from 2021 edition to 2024
-[FIXED] Cargo.toml (1 fix)
-[UPDATING] `dummy-registry` index
-[LOCKING] 2 packages to latest compatible versions
-[CHECKING] foo v0.1.0 ([CWD])
-[MIGRATING] src/lib.rs from 2021 edition to 2024
-[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [..]s
-",
-        )
-        .run();
-    assert_e2e().eq(
-        p.read_file("Cargo.toml"),
-        str![[r#"
-
-[package]
-name = "foo"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-dep = { version = "0.1.0", optional = true }
-
-[features]
-existing = []
-dep = ["dep:dep"]
-
-"#]],
-    );
-}
-
-#[cargo_test]
-fn activate_dep_for_dep_feature() {
-    Package::new("dep-feature", "0.1.0")
-        .feature("a", &[])
-        .feature("b", &[])
-        .publish();
-    Package::new("dep-and-dep-feature", "0.1.0")
-        .feature("a", &[])
-        .feature("b", &[])
-        .publish();
-    Package::new("renamed-feature", "0.1.0")
-        .feature("a", &[])
-        .feature("b", &[])
-        .publish();
-    Package::new("unrelated-feature", "0.1.0")
-        .feature("a", &[])
-        .feature("b", &[])
-        .publish();
-    let p = project()
-        .file(
-            "Cargo.toml",
-            r#"
-[package]
-name = "foo"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-dep-feature = { version = "0.1.0", optional = true }
-dep-and-dep-feature = { version = "0.1.0", optional = true }
-renamed-feature = { version = "0.1.0", optional = true }
-unrelated-feature = { version = "0.1.0", optional = true }
-
-[features]
-dep-feature = ["dep-feature/a", "dep-feature/b"]
-dep-and-dep-feature = ["dep:dep-and-dep-feature", "dep-and-dep-feature/a", "dep-and-dep-feature/b"]
-renamed = ["renamed-feature/a", "renamed-feature/b"]
-unrelated-feature = []
-unrelated-dep-feature = ["unrelated-feature/a", "unrelated-feature/b"]
-"#,
-        )
-        .file("src/lib.rs", "")
-        .build();
-
-    p.cargo("fix --edition --allow-no-vcs")
-        .masquerade_as_nightly_cargo(&["edition2024"])
-        .with_stderr(
-            "\
-[MIGRATING] Cargo.toml from 2021 edition to 2024
-[FIXED] Cargo.toml (4 fixes)
-[UPDATING] `dummy-registry` index
-[LOCKING] 5 packages to latest compatible versions
-[CHECKING] foo v0.1.0 ([CWD])
-[MIGRATING] src/lib.rs from 2021 edition to 2024
-[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [..]s
-",
-        )
-        .run();
-    assert_e2e().eq(
-        p.read_file("Cargo.toml"),
-        str![[r#"
-
-[package]
-name = "foo"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-dep-feature = { version = "0.1.0", optional = true }
-dep-and-dep-feature = { version = "0.1.0", optional = true }
-renamed-feature = { version = "0.1.0", optional = true }
-unrelated-feature = { version = "0.1.0", optional = true }
-
-[features]
-dep-feature = [ "dep:dep-feature","dep-feature/a", "dep-feature/b"]
-dep-and-dep-feature = ["dep:dep-and-dep-feature", "dep-and-dep-feature/a", "dep-and-dep-feature/b"]
-renamed = [ "dep:renamed-feature","renamed-feature/a", "renamed-feature/b"]
-unrelated-feature = []
-unrelated-dep-feature = [ "dep:unrelated-feature","unrelated-feature/a", "unrelated-feature/b"]
-renamed-feature = ["dep:renamed-feature"]
 
 "#]],
     );
@@ -2834,14 +2692,14 @@ dep_df_false = { version = "0.1.0", default-features = false }
 
     p.cargo("fix --all --edition --allow-no-vcs")
         .masquerade_as_nightly_cargo(&["edition2024"])
-        .with_stderr_unordered(
-            "\
+        .with_stderr_data(
+            str![[r#"
 [MIGRATING] pkg_default/Cargo.toml from 2021 edition to 2024
 [MIGRATING] pkg_df_true/Cargo.toml from 2021 edition to 2024
 [MIGRATING] pkg_df_false/Cargo.toml from 2021 edition to 2024
 [FIXED] pkg_df_false/Cargo.toml (6 fixes)
 [UPDATING] `dummy-registry` index
-[LOCKING] 6 packages to latest compatible versions
+[LOCKING] 3 packages to latest compatible versions
 [DOWNLOADING] crates ...
 [DOWNLOADED] dep_simple v0.1.0 (registry `dummy-registry`)
 [DOWNLOADED] dep_df_true v0.1.0 (registry `dummy-registry`)
@@ -2849,14 +2707,16 @@ dep_df_false = { version = "0.1.0", default-features = false }
 [CHECKING] dep_df_true v0.1.0
 [CHECKING] dep_df_false v0.1.0
 [CHECKING] dep_simple v0.1.0
-[CHECKING] pkg_df_true v0.1.0 ([CWD]/pkg_df_true)
-[CHECKING] pkg_df_false v0.1.0 ([CWD]/pkg_df_false)
-[CHECKING] pkg_default v0.1.0 ([CWD]/pkg_default)
+[CHECKING] pkg_df_true v0.1.0 ([ROOT]/foo/pkg_df_true)
+[CHECKING] pkg_df_false v0.1.0 ([ROOT]/foo/pkg_df_false)
+[CHECKING] pkg_default v0.1.0 ([ROOT]/foo/pkg_default)
 [MIGRATING] pkg_df_false/src/lib.rs from 2021 edition to 2024
 [MIGRATING] pkg_df_true/src/lib.rs from 2021 edition to 2024
 [MIGRATING] pkg_default/src/lib.rs from 2021 edition to 2024
-[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [..]s
-",
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]]
+            .unordered(),
         )
         .run();
 

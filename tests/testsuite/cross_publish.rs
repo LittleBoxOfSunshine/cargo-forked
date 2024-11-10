@@ -2,6 +2,7 @@
 
 use std::fs::File;
 
+use cargo_test_support::prelude::*;
 use cargo_test_support::{cross_compile, project, publish, registry, str};
 
 #[cargo_test]
@@ -57,7 +58,7 @@ fn simple_cross_package() {
         f,
         "foo-0.0.0.crate",
         &["Cargo.lock", "Cargo.toml", "Cargo.toml.orig", "src/main.rs"],
-        &[],
+        (),
     );
 }
 

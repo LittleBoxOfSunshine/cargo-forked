@@ -1,8 +1,7 @@
 //! Tests for Cargo usage of rustc `--check-cfg`.
 
-#![allow(deprecated)]
-
-use cargo_test_support::{basic_manifest, project};
+use cargo_test_support::prelude::*;
+use cargo_test_support::{basic_manifest, project, str};
 
 macro_rules! x {
     ($tool:tt => $what:tt $(of $who:tt)?) => {{
@@ -53,7 +52,6 @@ fn features() {
     p.cargo("check -v")
         .with_stderr_contains(x!("rustc" => "cfg" of "feature" with "f_a" "f_b"))
         .with_stderr_contains(x!("rustc" => "cfg" of "docsrs"))
-        .with_stderr_does_not_contain("[..]-Zunstable-options[..]")
         .run();
 }
 
@@ -210,11 +208,18 @@ fn features_fingerprint() {
 
     p.cargo("check -v")
         // we check that the fingerprint is indeed dirty
-        .with_stderr_contains("[..]Dirty[..]the list of declared features changed")
         // that is cause rustc to be called again with the new check-cfg args
-        .with_stderr_contains(x!("rustc" => "cfg" of "feature" with "f_a"))
         // and that we indeed found a new warning from the unexpected_cfgs lint
-        .with_stderr_contains("[..]unexpected_cfgs[..]")
+        .with_stderr_data(format!(
+            "\
+[DIRTY] foo v0.1.0 ([ROOT]/foo): the list of declared features changed
+[CHECKING] foo v0.1.0 ([ROOT]/foo)
+{running_rustc}
+[WARNING] unexpected `cfg` condition value: `f_b`
+...
+",
+            running_rustc = x!("rustc" => "cfg" of "feature" with "f_a")
+        ))
         .run();
 }
 
@@ -281,7 +286,6 @@ fn features_doctest() {
         .with_stderr_contains(x!("rustdoc" => "cfg" of "feature" with "default" "f_a" "f_b"))
         .with_stderr_contains(x!("rustc" => "cfg" of "docsrs"))
         .with_stderr_contains(x!("rustdoc" => "cfg" of "docsrs"))
-        .with_stderr_does_not_contain("[..]-Zunstable-options[..]")
         .run();
 }
 
@@ -336,7 +340,6 @@ fn features_doc() {
     p.cargo("doc -v")
         .with_stderr_contains(x!("rustdoc" => "cfg" of "feature" with "default" "f_a" "f_b"))
         .with_stderr_contains(x!("rustdoc" => "cfg" of "docsrs"))
-        .with_stderr_does_not_contain("[..]-Zunstable-options[..]")
         .run();
 }
 
@@ -364,7 +367,6 @@ fn build_script_feedback() {
     p.cargo("check -v")
         .with_stderr_contains(x!("rustc" => "cfg" of "foo"))
         .with_stderr_contains(x!("rustc" => "cfg" of "docsrs"))
-        .with_stderr_does_not_contain("[..]-Zunstable-options[..]")
         .run();
 }
 
@@ -391,18 +393,18 @@ fn build_script_doc() {
 
     p.cargo("doc -v")
         .with_stderr_does_not_contain("rustc [..] --check-cfg [..]")
-        .with_stderr_contains(x!("rustdoc" => "cfg" of "foo"))
-        .with_stderr(
+        .with_stderr_data(format!(
             "\
-[COMPILING] foo v0.0.1 ([CWD])
+[COMPILING] foo v0.0.1 ([ROOT]/foo)
 [RUNNING] `rustc [..] build.rs [..]`
-[RUNNING] `[..]/build-script-build`
-[DOCUMENTING] foo [..]
-[RUNNING] `rustdoc [..] src/main.rs [..]
-[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [..]
-[GENERATED] [CWD]/target/doc/foo/index.html
+[RUNNING] `[ROOT]/foo/target/debug/build/foo-[HASH]/build-script-build`
+[DOCUMENTING] foo v0.0.1 ([ROOT]/foo)
+{running_rustdoc}
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+[GENERATED] [ROOT]/foo/target/doc/foo/index.html
 ",
-        )
+            running_rustdoc = x!("rustdoc" => "cfg" of "foo")
+        ))
         .run();
 }
 
@@ -491,11 +493,27 @@ fn build_script_test() {
         .build();
 
     p.cargo("test -v")
-        .with_stderr_contains(x!("rustc" => "cfg" of "foo"))
-        .with_stderr_contains(x!("rustdoc" => "cfg" of "foo"))
-        .with_stdout_contains("test test_foo ... ok")
-        .with_stdout_contains("test test_bar ... ok")
-        .with_stdout_contains_n("test [..] ... ok", 3)
+        .with_stderr_data(
+            format!(
+                "\
+{running_rustc}
+{running_rustdoc}
+...
+",
+                running_rustc = x!("rustc" => "cfg" of "foo"),
+                running_rustdoc = x!("rustdoc" => "cfg" of "foo")
+            )
+            .unordered(),
+        )
+        .with_stdout_data(
+            str![[r#"
+test test_foo ... ok
+test test_bar ... ok
+test [..] ... ok
+...
+"#]]
+            .unordered(),
+        )
         .run();
 }
 
@@ -553,7 +571,14 @@ fn config_workspace() {
         .build();
 
     p.cargo("check -v")
-        .with_stderr_contains(x!("rustc" => "cfg" of "has_foo"))
+        .with_stderr_data(format!(
+            "\
+...
+{running_rustc}
+...
+",
+            running_rustc = x!("rustc" => "cfg" of "has_foo")
+        ))
         .with_stderr_does_not_contain("unexpected_cfgs")
         .run();
 }
@@ -608,7 +633,10 @@ fn config_invalid_position() {
         .build();
 
     p.cargo("check -v")
-        .with_stderr_contains("[..]unused manifest key: `lints.rust.use_bracket.check-cfg`[..]")
+        .with_stderr_data(str![[r#"
+[WARNING] unused manifest key: `lints.rust.use_bracket.check-cfg`
+...
+"#]])
         .with_stderr_does_not_contain(x!("rustc" => "cfg" of "has_foo"))
         .run();
 }
@@ -633,7 +661,10 @@ fn config_invalid_empty() {
 
     p.cargo("check")
         .with_status(101)
-        .with_stderr_contains("[..]missing field `level`[..]")
+        .with_stderr_data(str![[r#"
+[ERROR] missing field `level`
+...
+"#]])
         .run();
 }
 
@@ -657,9 +688,13 @@ fn config_invalid_not_list() {
 
     p.cargo("check")
         .with_status(101)
-        .with_stderr_contains(
-            "[ERROR] `lints.rust.unexpected_cfgs.check-cfg` must be a list of string",
-        )
+        .with_stderr_data(str![[r#"
+[ERROR] failed to parse manifest at `[ROOT]/foo/Cargo.toml`
+
+Caused by:
+  `lints.rust.unexpected_cfgs.check-cfg` must be a list of string
+
+"#]])
         .run();
 }
 
@@ -683,9 +718,13 @@ fn config_invalid_not_list_string() {
 
     p.cargo("check")
         .with_status(101)
-        .with_stderr_contains(
-            "[ERROR] `lints.rust.unexpected_cfgs.check-cfg` must be a list of string",
-        )
+        .with_stderr_data(str![[r#"
+[ERROR] failed to parse manifest at `[ROOT]/foo/Cargo.toml`
+
+Caused by:
+  `lints.rust.unexpected_cfgs.check-cfg` must be a list of string
+
+"#]])
         .run();
 }
 
@@ -737,7 +776,14 @@ fn config_with_cargo_doc() {
         .build();
 
     p.cargo("doc -v")
-        .with_stderr_contains(x!("rustdoc" => "cfg" of "has_foo"))
+        .with_stderr_data(format!(
+            "\
+...
+{running_rustdoc}
+...
+",
+            running_rustdoc = x!("rustdoc" => "cfg" of "has_foo")
+        ))
         .run();
 }
 
@@ -760,7 +806,14 @@ fn config_with_cargo_test() {
         .build();
 
     p.cargo("test -v")
-        .with_stderr_contains(x!("rustc" => "cfg" of "has_foo"))
+        .with_stderr_data(format!(
+            "\
+...
+{running_rustc}
+...
+",
+            running_rustc = x!("rustc" => "cfg" of "has_foo")
+        ))
         .run();
 }
 
@@ -870,7 +923,7 @@ fn config_fingerprint() {
 
     p.cargo("check -v")
         // we check that the fingerprint is indeed dirty
-        .with_stderr_contains("[..]Dirty[..]the profile configuration changed")
+        .with_stderr_contains("[..][DIRTY][..]the profile configuration changed")
         // that cause rustc to be called again with the new check-cfg args
         .with_stderr_contains(x!("rustc" => "cfg" of "bar"))
         .with_stderr_contains(x!("rustc" => "cfg" of "foo"))

@@ -1,8 +1,10 @@
 //! Tests for setting custom rustc flags.
 
+use std::fs;
+
+use cargo_test_support::prelude::*;
 use cargo_test_support::registry::Package;
 use cargo_test_support::{basic_manifest, paths, project, project_in_home, rustc_host, str};
-use std::fs;
 
 #[cargo_test]
 fn env_rustflags_normal_source() {
@@ -965,7 +967,7 @@ fn build_rustflags_for_build_scripts() {
         .file(
             "build.rs",
             r#"
-                fn main() { assert!(cfg!(foo)); }
+                fn main() { assert!(cfg!(foo), "CFG FOO!"); }
             "#,
         )
         .file(
@@ -984,12 +986,7 @@ fn build_rustflags_for_build_scripts() {
     p.cargo("check --target")
         .arg(host)
         .with_status(101)
-        .with_stderr_data(str![[r#"
-...
-  assertion failed: cfg!(foo)
-  [NOTE] run with `RUST_BACKTRACE=1` environment variable to display a backtrace
-
-"#]])
+        .with_stderr_data("...\n[..]CFG FOO![..]\n...")
         .run();
 
     // Enabling -Ztarget-applies-to-host should not make a difference without the config setting
@@ -1002,12 +999,7 @@ fn build_rustflags_for_build_scripts() {
         .masquerade_as_nightly_cargo(&["target-applies-to-host"])
         .arg("-Ztarget-applies-to-host")
         .with_status(101)
-        .with_stderr_data(str![[r#"
-...
-  assertion failed: cfg!(foo)
-  [NOTE] run with `RUST_BACKTRACE=1` environment variable to display a backtrace
-
-"#]])
+        .with_stderr_data("...\n[..]CFG FOO![..]\n...")
         .run();
 
     // When set to false though, the "proper" behavior where host artifacts _only_ pick up on
@@ -1025,24 +1017,14 @@ fn build_rustflags_for_build_scripts() {
         .masquerade_as_nightly_cargo(&["target-applies-to-host"])
         .arg("-Ztarget-applies-to-host")
         .with_status(101)
-        .with_stderr_data(str![[r#"
-...
-  assertion failed: cfg!(foo)
-  [NOTE] run with `RUST_BACKTRACE=1` environment variable to display a backtrace
-
-"#]])
+        .with_stderr_data("...\n[..]CFG FOO![..]\n...")
         .run();
     p.cargo("check --target")
         .arg(host)
         .masquerade_as_nightly_cargo(&["target-applies-to-host"])
         .arg("-Ztarget-applies-to-host")
         .with_status(101)
-        .with_stderr_data(str![[r#"
-...
-  assertion failed: cfg!(foo)
-  [NOTE] run with `RUST_BACKTRACE=1` environment variable to display a backtrace
-
-"#]])
+        .with_stderr_data("...\n[..]CFG FOO![..]\n...")
         .run();
 }
 
@@ -1585,5 +1567,121 @@ fn host_config_rustflags_with_target() {
         .arg("-Zunstable-options")
         .arg("--config")
         .arg("host.rustflags=[\"--cfg=foo\"]")
+        .run();
+}
+
+#[cargo_test]
+fn target_applies_to_host_rustflags_works() {
+    // Ensures that rustflags are passed to the target when
+    // target_applies_to_host=false
+    let p = project()
+        .file(
+            "src/lib.rs",
+            r#"#[cfg(feature = "flag")] compile_error!("flag passed");"#,
+        )
+        .build();
+
+    // Use RUSTFLAGS to pass an argument that will generate an error.
+    p.cargo("check")
+        .masquerade_as_nightly_cargo(&["target-applies-to-host"])
+        .arg("-Ztarget-applies-to-host")
+        .env("CARGO_TARGET_APPLIES_TO_HOST", "false")
+        .env("RUSTFLAGS", r#"--cfg feature="flag""#)
+        .with_status(101)
+        .with_stderr_data(
+            "[CHECKING] foo v0.0.1 ([ROOT]/foo)
+[ERROR] flag passed
+...",
+        )
+        .run();
+}
+
+#[cargo_test]
+fn target_applies_to_host_rustdocflags_works() {
+    // Ensures that rustflags are passed to the target when
+    // target_applies_to_host=false
+    let p = project()
+        .file(
+            "src/lib.rs",
+            r#"#[cfg(feature = "flag")] compile_error!("flag passed");"#,
+        )
+        .build();
+
+    // Use RUSTFLAGS to pass an argument that would generate an error
+    // but it is ignored.
+    p.cargo("doc")
+        .masquerade_as_nightly_cargo(&["target-applies-to-host"])
+        .arg("-Ztarget-applies-to-host")
+        .env("CARGO_TARGET_APPLIES_TO_HOST", "false")
+        .env("RUSTDOCFLAGS", r#"--cfg feature="flag""#)
+        .with_status(101)
+        .with_stderr_data(
+            "[DOCUMENTING] foo v0.0.1 ([ROOT]/foo)
+[ERROR] flag passed
+...",
+        )
+        .run();
+}
+
+#[cargo_test]
+fn host_config_shared_build_dep() {
+    // rust-lang/cargo#14253
+    Package::new("cc", "1.0.0").publish();
+    let p = project()
+        .file(
+            "Cargo.toml",
+            r#"
+            [package]
+            name = "bootstrap"
+            edition = "2021"
+
+            [dependencies]
+            cc = "1.0.0"
+
+            [build-dependencies]
+            cc = "1.0.0"
+
+            [profile.dev]
+            debug = 0
+            "#,
+        )
+        .file("src/lib.rs", "")
+        .file("build.rs", "fn main() {}")
+        .file(
+            ".cargo/config.toml",
+            "
+            target-applies-to-host=false
+
+            [host]
+            rustflags = ['--cfg', 'from_host']
+
+            [build]
+            rustflags = ['--cfg', 'from_target']
+            ",
+        )
+        .build();
+
+    p.cargo("build -v")
+        .masquerade_as_nightly_cargo(&["target-applies-to-host"])
+        .arg("-Ztarget-applies-to-host")
+        .arg("-Zhost-config")
+        .with_stderr_data(
+            str![[r#"
+[UPDATING] `dummy-registry` index
+[LOCKING] 1 package to latest compatible version
+[DOWNLOADING] crates ...
+[DOWNLOADED] cc v1.0.0 (registry `dummy-registry`)
+[COMPILING] cc v1.0.0
+[RUNNING] `rustc --crate-name cc [..]--cfg from_host[..]`
+[RUNNING] `rustc --crate-name cc [..]--cfg from_target[..]`
+[COMPILING] bootstrap v0.0.0 ([ROOT]/foo)
+[RUNNING] `rustc --crate-name build_script_build [..]--cfg from_host[..]`
+[RUNNING] `[ROOT]/foo/target/debug/build/bootstrap-[HASH]/build-script-build`
+[RUNNING] `rustc --crate-name bootstrap[..]--cfg from_target[..]`
+[FINISHED] `dev` profile [unoptimized] target(s) in [ELAPSED]s
+
+"#]]
+            .unordered(),
+        )
         .run();
 }

@@ -1,5 +1,12 @@
 //! Tests for config settings.
 
+use std::borrow::Borrow;
+use std::collections::{BTreeMap, HashMap};
+use std::fs;
+use std::io;
+use std::os;
+use std::path::{Path, PathBuf};
+
 use cargo::core::features::{GitFeatures, GitoxideFeatures};
 use cargo::core::{PackageIdSpec, Shell};
 use cargo::util::context::{
@@ -9,17 +16,11 @@ use cargo::CargoResult;
 use cargo_test_support::compare::assert_e2e;
 use cargo_test_support::prelude::*;
 use cargo_test_support::str;
-use cargo_test_support::{paths, project, symlink_supported, t};
+use cargo_test_support::{paths, project, project_in_home, symlink_supported, t};
 use cargo_util_schemas::manifest::TomlTrimPaths;
 use cargo_util_schemas::manifest::TomlTrimPathsValue;
 use cargo_util_schemas::manifest::{self as cargo_toml, TomlDebugInfo, VecStringOrBool as VSOB};
 use serde::Deserialize;
-use std::borrow::Borrow;
-use std::collections::{BTreeMap, HashMap};
-use std::fs;
-use std::io;
-use std::os;
-use std::path::{Path, PathBuf};
 
 /// Helper for constructing a `GlobalContext` object.
 pub struct GlobalContextBuilder {
@@ -296,6 +297,26 @@ f1 = 1
 
 "#]];
     assert_e2e().eq(&output, expected);
+}
+
+#[cargo_test]
+fn home_config_works_without_extension() {
+    write_config_at(
+        paths::cargo_home().join("config"),
+        "\
+[foo]
+f1 = 1
+",
+    );
+    let p = project_in_home("foo").file("src/lib.rs", "").build();
+
+    p.cargo("-vV")
+        .with_stderr_data(str![[r#"
+[WARNING] `[ROOT]/home/.cargo/config` is deprecated in favor of `config.toml`
+[NOTE] if you need to support cargo 1.38 or earlier, you can symlink `config` to `config.toml`
+
+"#]])
+        .run();
 }
 
 #[cargo_test]

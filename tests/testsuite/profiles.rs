@@ -1,9 +1,10 @@
 //! Tests for profiles.
 
+use std::env;
+
 use cargo_test_support::prelude::*;
 use cargo_test_support::registry::Package;
 use cargo_test_support::{project, rustc_host, str};
-use std::env;
 
 #[cargo_test]
 fn profile_overrides() {
@@ -186,7 +187,7 @@ fn top_level_overrides_deps() {
     p.cargo("build -v --release")
         .with_stderr_data(&format!(
             "\
-[LOCKING] 2 packages to latest compatible versions
+[LOCKING] 1 package to latest compatible version
 [COMPILING] foo v0.0.0 ([ROOT]/foo/foo)
 [RUNNING] `rustc --crate-name foo --edition=2015 foo/src/lib.rs [..]\
         --crate-type dylib --crate-type rlib \
@@ -259,7 +260,6 @@ fn profile_in_non_root_manifest_triggers_a_warning() {
 [WARNING] profiles for the non root package will be ignored, specify profiles at the workspace root:
 package:   [ROOT]/foo/bar/Cargo.toml
 workspace: [ROOT]/foo/Cargo.toml
-[LOCKING] 2 packages to latest compatible versions
 [COMPILING] bar v0.1.0 ([ROOT]/foo/bar)
 [RUNNING] `rustc [..]`
 [FINISHED] `dev` profile [unoptimized] target(s) in [ELAPSED]s
@@ -439,7 +439,6 @@ fn panic_unwind_does_not_build_twice() {
         .run();
 }
 
-#[allow(deprecated)]
 #[cargo_test]
 fn debug_0_report() {
     // The finished line handles 0 correctly.
@@ -584,7 +583,6 @@ fn strip_accepts_true_to_strip_symbols() {
         .run();
 }
 
-#[allow(deprecated)]
 #[cargo_test]
 fn strip_accepts_false_to_disable_strip() {
     let p = project()
@@ -670,7 +668,6 @@ fn strip_debuginfo_without_debug() {
         .run();
 }
 
-#[allow(deprecated)]
 #[cargo_test]
 fn do_not_strip_debuginfo_with_requested_debug() {
     let p = project()
@@ -834,7 +831,6 @@ Caused by:
         .run();
 }
 
-#[allow(deprecated)]
 #[cargo_test]
 fn debug_options_valid() {
     let build = |option| {

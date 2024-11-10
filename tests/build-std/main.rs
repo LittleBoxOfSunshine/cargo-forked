@@ -19,9 +19,9 @@
 //! Otherwise the tests are skipped.
 
 #![allow(clippy::disallowed_methods)]
-#![allow(deprecated)]
 
-use cargo_test_support::*;
+use cargo_test_support::prelude::*;
+use cargo_test_support::{basic_manifest, paths, project, rustc_host, str, Execs};
 use std::env;
 use std::path::Path;
 
@@ -113,13 +113,37 @@ fn basic() {
         .target_host()
         // Importantly, this should not say [UPDATING]
         // There have been multiple bugs where every build triggers and update.
-        .with_stderr(
-            "[COMPILING] foo v0.0.1 [..]\n\
-             [FINISHED] `dev` profile [..]",
-        )
+        .with_stderr_data(str![[r#"
+[COMPILING] foo v0.0.1 ([ROOT]/foo)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
         .run();
-    p.cargo("run").build_std().target_host().run();
-    p.cargo("test").build_std().target_host().run();
+    p.cargo("run")
+        .build_std()
+        .target_host()
+        .with_stderr_data(str![[r#"
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+[RUNNING] `target/[HOST_TARGET]/debug/foo`
+
+"#]])
+        .run();
+    p.cargo("test")
+        .build_std()
+        .target_host()
+        .with_stderr_data(str![[r#"
+[COMPILING] rustc-std-workspace-std [..]
+...
+[COMPILING] test v0.0.0 ([..])
+[COMPILING] foo v0.0.1 ([ROOT]/foo)
+[FINISHED] `test` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+[RUNNING] unittests src/lib.rs (target/[HOST_TARGET]/debug/deps/foo-[HASH])
+[RUNNING] unittests src/main.rs (target/[HOST_TARGET]/debug/deps/foo-[HASH])
+[RUNNING] tests/smoke.rs (target/[HOST_TARGET]/debug/deps/smoke-[HASH])
+[DOCTEST] foo
+
+"#]])
+        .run();
 
     // Check for hack that removes dylibs.
     let deps_dir = Path::new("target")
@@ -128,6 +152,66 @@ fn basic() {
         .join("deps");
     assert!(p.glob(deps_dir.join("*.rlib")).count() > 0);
     assert_eq!(p.glob(deps_dir.join("*.dylib")).count(), 0);
+}
+
+#[cargo_test(build_std_real)]
+fn host_proc_macro() {
+    let p = project()
+        .file(
+            "Cargo.toml",
+            r#"
+                [package]
+                name = "foo"
+                version = "0.1.0"
+                edition = "2021"
+
+                [dependencies]
+                macro_test = { path = "macro_test" }
+            "#,
+        )
+        .file(
+            "src/main.rs",
+            r#"
+            extern crate macro_test;
+            use macro_test::make_answer;
+
+            make_answer!();
+
+            fn main() {
+                println!("Hello, World: {}", answer());
+            }
+            "#,
+        )
+        .file(
+            "macro_test/Cargo.toml",
+            r#"
+            [package]
+            name = "macro_test"
+            version = "0.1.0"
+            edition = "2021"
+
+            [lib]
+            proc-macro = true
+            "#,
+        )
+        .file(
+            "macro_test/src/lib.rs",
+            r#"
+            extern crate proc_macro;
+            use proc_macro::TokenStream;
+
+            #[proc_macro]
+            pub fn make_answer(_item: TokenStream) -> TokenStream {
+                "fn answer() -> u32 { 42 }".parse().unwrap()
+            }
+            "#,
+        )
+        .build();
+
+    p.cargo("build")
+        .build_std_arg("std")
+        .build_std_arg("proc_macro")
+        .run();
 }
 
 #[cargo_test(build_std_real)]
@@ -261,15 +345,18 @@ fn remap_path_scope() {
         .build_std()
         .target_host()
         .with_status(101)
-        .with_stderr_contains(
-            "\
-[FINISHED] `release` profile [optimized + debuginfo] [..]
-[RUNNING] [..]
-[..]thread '[..]' panicked at [..]src/main.rs:3:[..]",
+        .with_stderr_data(
+            str![[r#"
+[FINISHED] `release` profile [optimized + debuginfo] target(s) in [ELAPSED]s
+[RUNNING] `target/[HOST_TARGET]/release/foo`
+[..]thread '[..]' panicked at [..]src/main.rs:3:[..]:
+[..]remap to /rustc/<hash>[..]
+[..]at /rustc/[..]/library/std/src/[..]
+[..]at ./src/main.rs:3:[..]
+[..]at /rustc/[..]/library/core/src/[..]
+...
+"#]]
+            .unordered(),
         )
-        .with_stderr_contains("remap to /rustc/<hash>")
-        .with_stderr_contains("[..]at /rustc/[..]/library/std/src/[..]")
-        .with_stderr_contains("[..]at src/main.rs:3[..]")
-        .with_stderr_contains("[..]at /rustc/[..]/library/core/src/[..]")
         .run();
 }

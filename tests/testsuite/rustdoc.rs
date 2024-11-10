@@ -1,5 +1,6 @@
 //! Tests for the `cargo rustdoc` command.
 
+use cargo_test_support::prelude::*;
 use cargo_test_support::str;
 use cargo_test_support::{basic_manifest, cross_compile, project};
 
@@ -154,7 +155,7 @@ fn rustdoc_foo_with_bar_dependency() {
 
     foo.cargo("rustdoc -v -- --cfg=foo")
         .with_stderr_data(str![[r#"
-[LOCKING] 2 packages to latest compatible versions
+[LOCKING] 1 package to latest compatible version
 [CHECKING] bar v0.0.1 ([ROOT]/bar)
 [RUNNING] `rustc [..] [ROOT]/bar/src/lib.rs [..]`
 [DOCUMENTING] foo v0.0.1 ([ROOT]/foo)
@@ -192,7 +193,7 @@ fn rustdoc_only_bar_dependency() {
 
     foo.cargo("rustdoc -v -p bar -- --cfg=foo")
         .with_stderr_data(str![[r#"
-[LOCKING] 2 packages to latest compatible versions
+[LOCKING] 1 package to latest compatible version
 [DOCUMENTING] bar v0.0.1 ([ROOT]/bar)
 [RUNNING] `rustdoc [..] --crate-name bar [ROOT]/bar/src/lib.rs -o [ROOT]/foo/target/doc [..] --cfg=foo -C metadata=[..] -L dependency=[ROOT]/foo/target/debug/deps [..]`
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s

@@ -1,10 +1,12 @@
 //! Tests for the `cargo tree` command.
 
-use super::features2::switch_to_resolver_2;
 use cargo_test_support::cross_compile::{self, alternate};
+use cargo_test_support::prelude::*;
 use cargo_test_support::registry::{Dependency, Package};
 use cargo_test_support::str;
 use cargo_test_support::{basic_manifest, git, project, rustc_host, Project};
+
+use super::features2::switch_to_resolver_2;
 
 fn make_simple_proj() -> Project {
     Package::new("c", "1.0.0").publish();
@@ -1622,8 +1624,8 @@ fn ambiguous_name() {
     p.cargo("tree -p dep")
         .with_stderr_data(str![[r#"
 [UPDATING] `dummy-registry` index
-[LOCKING] 4 packages to latest compatible versions
-[ADDING] dep v1.0.0 (latest: v2.0.0)
+[LOCKING] 3 packages to latest compatible versions
+[ADDING] dep v1.0.0 (available: v2.0.0)
 [DOWNLOADING] crates ...
 [DOWNLOADED] dep v2.0.0 (registry `dummy-registry`)
 [DOWNLOADED] dep v1.0.0 (registry `dummy-registry`)
